@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: self-hosted
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -16,11 +17,25 @@ jobs:
         run: |
           brew install packer tart ansible || true
 
+      - name: Debug repo structure
+        run: |
+          echo "Current directory: $(pwd)"
+          ls -la
+          echo "Contents of mac/tester15:"
+          ls -la mac/tester15
+
       - name: Run macOS VM build
         working-directory: mac/tester15
         env:
           VM_NAME: sequoia-tester
-          VAULT_FILE: mac/tester15/vault-fake.yaml
+          VAULT_FILE: vault-fake.yaml
         run: |
           chmod +x builder.sh
           ./builder.sh
+
+      - name: Tart push image
+        env:
+          TART_REGISTRY_USERNAME: "rcurranmoz"
+          TART_REGISTRY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          tart push sequoia-tester registry-1.docker.io/rcurranmoz/macos-testing:latest
