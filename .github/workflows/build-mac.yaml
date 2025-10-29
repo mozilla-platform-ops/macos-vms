@@ -76,8 +76,18 @@ jobs:
           VM_NAME: sequoia-tester
           VAULT_FILE: ${{ env.VAULT_FILE }}
         run: |
+          set -euo pipefail
           echo "🏗️ Using VAULT_FILE=$VAULT_FILE"
+          echo "🔍 Verifying vault exists and is readable..."
+          if [[ ! -f "$VAULT_FILE" ]]; then
+            echo "❌ Missing vault: $VAULT_FILE"
+            ls -lah "$(dirname "$VAULT_FILE")" || true
+            exit 1
+          fi
+          echo "✅ Vault found; sha256=$(shasum -a 256 "$VAULT_FILE" | cut -d' ' -f1)"
           chmod +x builder.sh
+          # 👇 Ensure absolute path is passed to packer
+          export VAULT_FILE=$(realpath "$VAULT_FILE")
           ./builder.sh
 
       - name: Verify registry connectivity
