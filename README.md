@@ -1,4 +1,3 @@
-<artifact identifier="macos-vms-readme" type="text/markdown" title="macOS VM Builder README">
 # 🖥️ macOS CI Virtual Machine Builder
 
 **Automated, repeatable, production-ready macOS VM images for CI/CD workflows.**
