@@ -6,7 +6,6 @@
 set -e
 
 # Get the primary network interface
-# For Tart VMs, this is typically en0 (Ethernet/Bridged Adapter)
 PRIMARY_INTERFACE="en0"
 
 # Fallback: try to detect the primary interface dynamically
@@ -31,32 +30,50 @@ CURRENT_HOSTNAME=$(scutil --get HostName 2>/dev/null || echo "")
 
 if [[ "$CURRENT_HOSTNAME" == "$HOSTNAME" ]]; then
     echo "✅ Hostname already set correctly: $CURRENT_HOSTNAME"
-    exit 0
+    # Still update config files in case they're stale
+else
+    echo "⚙️ Updating system hostname to $HOSTNAME..."
+    
+    # Apply hostname system-wide
+    scutil --set ComputerName "$HOSTNAME"
+    scutil --set LocalHostName "$HOSTNAME"
+    scutil --set HostName "$HOSTNAME"
+    
+    # Flush caches and refresh Bonjour/mDNSResponder
+    dscacheutil -flushcache
+    killall -HUP mDNSResponder 2>/dev/null || true
+    
+    echo "✅ New Hostname: $(scutil --get HostName)"
 fi
 
-echo "⚙️ Updating system hostname to $HOSTNAME..."
-
-# Apply hostname system-wide
-scutil --set ComputerName "$HOSTNAME"
-scutil --set LocalHostName "$HOSTNAME"
-scutil --set HostName "$HOSTNAME"
-
-# Flush caches and refresh Bonjour/mDNSResponder
-dscacheutil -flushcache
-killall -HUP mDNSResponder 2>/dev/null || true
-
-# Confirm new hostname
-echo "✅ New Hostname: $(scutil --get HostName)"
-
-# Update Taskcluster worker config if it exists
-CONFIG_FILE="/opt/worker/worker-runner-config.yaml"
-if [[ -f "$CONFIG_FILE" ]]; then
+# Update worker-runner-config.yaml
+WORKER_CONFIG="/opt/worker/worker-runner-config.yaml"
+if [[ -f "$WORKER_CONFIG" ]]; then
     echo "🛠️ Updating worker-runner-config.yaml..."
-    sudo sed -i.bak "s/^workerID:.*/workerID: \"$HOSTNAME\"/" "$CONFIG_FILE"
-    sudo sed -i.bak "s/^workerId:.*/workerId: \"$HOSTNAME\"/" "$CONFIG_FILE"
+    
+    # Use sed to replace the workerID in the YAML structure
+    # Pattern matches: workerID: "old-hostname" and replaces with new hostname
+    sudo sed -i.bak "s/workerID: \"[^\"]*\"/workerID: \"$HOSTNAME\"/g" "$WORKER_CONFIG"
+    
+    # Also update in the workerTypeMetadata section
+    sudo sed -i '' "s/workerId: \"[^\"]*\"/workerId: \"$HOSTNAME\"/g" "$WORKER_CONFIG"
+    
     echo "✅ Updated worker-runner-config.yaml"
 else
-    echo "⚠️ No worker config found at $CONFIG_FILE — skipping."
+    echo "⚠️ No worker-runner config found at $WORKER_CONFIG"
+fi
+
+# Update generic-worker.conf.yaml
+GW_CONFIG="/opt/worker/generic-worker.conf.yaml"
+if [[ -f "$GW_CONFIG" ]]; then
+    echo "🛠️ Updating generic-worker.conf.yaml..."
+    
+    # Update JSON format config
+    sudo sed -i.bak "s/\"workerId\": \"[^\"]*\"/\"workerId\": \"$HOSTNAME\"/g" "$GW_CONFIG"
+    
+    echo "✅ Updated generic-worker.conf.yaml"
+else
+    echo "⚠️ No generic-worker config found at $GW_CONFIG"
 fi
 
 echo "🏁 Hostname configuration complete."
