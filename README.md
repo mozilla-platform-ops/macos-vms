@@ -30,11 +30,11 @@ This repository automates the entire lifecycle of macOS CI virtual machines:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    GitHub Actions (Builder)                  │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
-│  │  PR Build    │    │  Main Build  │    │  Push to OCI │  │
-│  │ (Fake Vault) │───▶│ (Real Vault) │───▶│   Registry   │  │
-│  └──────────────┘    └──────────────┘    └──────────────┘  │
+│                    GitHub Actions (Builder)                 │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐   │
+│  │  PR Build    │    │  Main Build  │    │  Push to OCI │   │
+│  │ (Fake Vault) │───▶│ (Real Vault) │───▶│   Registry   │   │
+│  └──────────────┘    └──────────────┘    └──────────────┘   │
 └─────────────────────────────────────────────────────────────┘
                                │
                                ▼
