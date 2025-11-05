@@ -126,8 +126,6 @@ Fully automated macOS installation from IPSW:
 - Enables SSH and Screen Sharing
 - Automated keyboard navigation through setup wizard
 
-**Key Innovation:** Uses Tart's `boot_command` to simulate keyboard input through the entire macOS setup assistant without human intervention.
-
 ### Phase 2: Disable SIP (~2 min)
 
 - Boots into macOS Recovery
@@ -153,7 +151,7 @@ Final configuration:
 - Runs final Puppet apply with full configuration
 - Removes vault file for security
 
-**Total Build Time:** ~25-30 minutes
+**Total Build Time:** ~27 minutes
 
 ---
 
@@ -309,12 +307,15 @@ tart pull --insecure 10.49.56.161:5000/sequoia-tester:prod-latest
 - Phase 2 (SIP): ~2 min
 - Phase 3 (Puppet 1): ~7 min
 - Phase 4 (Puppet 2): ~2-3 min
-- **Total:** ~25-30 minutes
+- **Total:** ~27 minutes
 
 **Image Sizes:**
-- Base macOS: ~20 GB
-- After Puppet: ~40 GB
-- Compressed in OCI: ~17 GB
+- Base macOS: ~14 GB
+- After Puppet: ~16 GB
+- Compressed in OCI: ~22 GB
+- Uncompressed on disk: ~100 GB
+
+**Fun Fact:** Due to copy-on-write magic in Apple File System (APFS), a cloned VM won't actually claim all 100 GB right away. Only changes to a cloned disk will be written and claim new space. This also speeds up clones enormously—creating a new worker VM takes seconds instead of minutes.
 
 **Resource Requirements:**
 - CPU: 4 cores per VM
