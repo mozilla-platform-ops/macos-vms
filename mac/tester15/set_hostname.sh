@@ -5,12 +5,18 @@
 
 set -e
 
-# Get the primary network interface (defaults to en0)
-PRIMARY_INTERFACE=$(networksetup -listallhardwareports | \
-  awk '/Hardware Port: Wi-Fi/{getline; print $2; exit}' || echo "en0")
+# Get the primary network interface
+# For Tart VMs, this is typically en0 (Ethernet/Bridged Adapter)
+PRIMARY_INTERFACE="en0"
+
+# Fallback: try to detect the primary interface dynamically
+if ! ifconfig "$PRIMARY_INTERFACE" &>/dev/null; then
+    echo "⚠️ en0 not found, detecting primary interface..."
+    PRIMARY_INTERFACE=$(route -n get default 2>/dev/null | awk '/interface:/{print $2}' || echo "en0")
+fi
 
 # Extract the MAC address
-MAC_ADDRESS=$(ifconfig "$PRIMARY_INTERFACE" | awk '/ether/{print $2}')
+MAC_ADDRESS=$(ifconfig "$PRIMARY_INTERFACE" 2>/dev/null | awk '/ether/{print $2}')
 if [[ -z "$MAC_ADDRESS" ]]; then
     echo "❌ Could not determine MAC address for $PRIMARY_INTERFACE"
     exit 1
@@ -50,7 +56,7 @@ if [[ -f "$CONFIG_FILE" ]]; then
     sudo sed -i.bak "s/^workerId:.*/workerId: \"$HOSTNAME\"/" "$CONFIG_FILE"
     echo "✅ Updated worker-runner-config.yaml"
 else
-    echo "⚠️ No worker-runner config found at $CONFIG_FILE — skipping."
+    echo "⚠️ No worker config found at $CONFIG_FILE — skipping."
 fi
 
 echo "🏁 Hostname configuration complete."
