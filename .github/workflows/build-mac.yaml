@@ -6,6 +6,10 @@ on:
     types: [opened, synchronize, reopened]
   push:
     branches: [ main ]
+  
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 
 env:
   REGISTRY_HOST: 10.49.56.161
