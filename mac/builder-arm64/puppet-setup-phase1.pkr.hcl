@@ -79,6 +79,9 @@ build {
       "curl -o /tmp/run-puppet.sh https://ronin-puppet-package-repo.s3.us-west-2.amazonaws.com/macos/public/common/run-puppet.sh",
       "chmod +x /tmp/run-puppet.sh",
 
+      "echo 'Installing vault gems required by hiera-vault backend...'",
+      "sudo /opt/puppetlabs/puppet/bin/gem install vault debouncer --no-document",
+
       "echo 'Cloning Puppet repo (branch: ${var.puppet_branch})...'",
       "sudo mkdir -p /opt/puppet_environments/mozilla-platform-ops",
       "sudo git clone --branch ${var.puppet_branch} https://github.com/mozilla-platform-ops/ronin_puppet.git /opt/puppet_environments/mozilla-platform-ops/ronin_puppet",
