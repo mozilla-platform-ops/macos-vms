@@ -79,12 +79,14 @@ build {
       "curl -o /tmp/run-puppet.sh https://ronin-puppet-package-repo.s3.us-west-2.amazonaws.com/macos/public/common/run-puppet.sh",
       "chmod +x /tmp/run-puppet.sh",
 
-      "echo 'Installing vault gems required by hiera-vault backend...'",
-      "sudo /opt/puppetlabs/puppet/bin/gem install vault debouncer --no-document",
-
       "echo 'Cloning Puppet repo (branch: ${var.puppet_branch})...'",
       "sudo mkdir -p /opt/puppet_environments/mozilla-platform-ops",
       "sudo git clone --branch ${var.puppet_branch} https://github.com/mozilla-platform-ops/ronin_puppet.git /opt/puppet_environments/mozilla-platform-ops/ronin_puppet",
+
+      # Disable the hiera-vault backend during imaging — we use a pre-fetched flat vault.yaml,
+      # not a live Vault server. The vault gem requires Ruby >= 3.2 but Puppet 7 ships with 2.7.
+      # git reset --hard on production workers restores hiera.yaml on first real Puppet run.
+      "sudo mv /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/vault_secrets/hiera.yaml /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/vault_secrets/hiera.yaml.disabled",
 
       # pipconf requires pip to already be installed, which happens during this first puppet run.
       # Disable it here so the first run can install Python/pip, then phase2 re-enables it.
