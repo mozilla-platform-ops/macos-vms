@@ -82,6 +82,7 @@ echo "--- Phase 5: Puppet phase 2 ---"
 packer build \
     -var "vm_name=${ROLE_VM}" \
     -var "puppet_role=${ROLE}" \
+    -var "puppet_branch=${PUPPET_BRANCH}" \
     puppet-setup-phase2.pkr.hcl
 
 echo ""

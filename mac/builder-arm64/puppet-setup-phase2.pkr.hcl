@@ -15,6 +15,11 @@ variable "puppet_role" {
   type = string
 }
 
+variable "puppet_branch" {
+  type    = string
+  default = "master"
+}
+
 source "tart-cli" "puppet-setup-phase2" {
   vm_name      = var.vm_name
   cpu_count    = 8
@@ -56,10 +61,14 @@ build {
       "echo 'Re-enabling pipconf...'",
       "sudo sed -i '.bak' '/#.*pipconf/s/^#//' /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/roles_profiles/manifests/roles/${var.puppet_role}.pp",
 
+      # run-puppet.sh does git reset --hard which restores vault_secrets/hiera.yaml from master,
+      # re-introducing the vault gem requirement. Disable it again before phase 2 runs.
+      "sudo mv /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/vault_secrets/hiera.yaml /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/vault_secrets/hiera.yaml.disabled || true",
+
       "echo 'Running Puppet (phase 2)...'",
       "curl -o /tmp/run-puppet.sh https://ronin-puppet-package-repo.s3.us-west-2.amazonaws.com/macos/public/common/run-puppet.sh",
       "sudo chmod +x /tmp/run-puppet.sh",
-      "sudo /tmp/run-puppet.sh || echo 'Puppet phase 2 completed with non-fatal errors, continuing...'",
+      "sudo env PUPPET_BRANCH=${var.puppet_branch} /tmp/run-puppet.sh || echo 'Puppet phase 2 completed with non-fatal errors, continuing...'",
 
       "sudo rm -f /var/root/vault.yaml",
 
