@@ -20,6 +20,11 @@ variable "vault_file" {
   default = "/Users/admin/Downloads/vault.yaml"
 }
 
+variable "puppet_branch" {
+  type    = string
+  default = "master"
+}
+
 source "tart-cli" "puppet-setup-phase1" {
   vm_name      = var.vm_name
   cpu_count    = 8
@@ -74,14 +79,14 @@ build {
       "curl -o /tmp/run-puppet.sh https://ronin-puppet-package-repo.s3.us-west-2.amazonaws.com/macos/public/common/run-puppet.sh",
       "chmod +x /tmp/run-puppet.sh",
 
-      "echo 'Cloning Puppet repo...'",
+      "echo 'Cloning Puppet repo (branch: ${var.puppet_branch})...'",
       "sudo mkdir -p /opt/puppet_environments/mozilla-platform-ops",
-      "sudo git clone --branch master https://github.com/mozilla-platform-ops/ronin_puppet.git /opt/puppet_environments/mozilla-platform-ops/ronin_puppet",
+      "sudo git clone --branch ${var.puppet_branch} https://github.com/mozilla-platform-ops/ronin_puppet.git /opt/puppet_environments/mozilla-platform-ops/ronin_puppet",
 
       # pipconf requires pip to already be installed, which happens during this first puppet run.
       # Disable it here so the first run can install Python/pip, then phase2 re-enables it.
       "echo 'Patching out pipconf for initial run...'",
-      "sudo sed -i '.bak' '/pipconf/s/^/#/' /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/roles_profiles/manifests/roles/${var.puppet_role}.pp",
+      "sudo sed -i '.bak' '/pipconf/s/^/#/' /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/roles_profiles/manifests/roles/${var.puppet_role}.pp || true",
 
       "echo 'Running Puppet (phase 1)...'",
       "sudo /tmp/run-puppet.sh",

@@ -9,6 +9,7 @@ ROLE="${ROLE:-gecko_1_b_osx_arm64_vms}"
 VAULT_FILE="${VAULT_FILE:-$(dirname "$0")/vault-fake.yaml}"
 BASE_VM="sequoia-arm64-base"
 REBUILD_BASE="${REBUILD_BASE:-false}"
+PUPPET_BRANCH="${PUPPET_BRANCH:-master}"
 
 # Map role to short VM name
 case "$ROLE" in
@@ -39,10 +40,11 @@ if [[ ! -f "$VAULT_FILE" ]]; then
 fi
 
 echo "=== macOS Builder Image Build ==="
-echo "  Role:       $ROLE"
-echo "  VM name:    $ROLE_VM"
-echo "  Vault file: $VAULT_FILE"
-echo "  Base VM:    $BASE_VM"
+echo "  Role:          $ROLE"
+echo "  VM name:       $ROLE_VM"
+echo "  Vault file:    $VAULT_FILE"
+echo "  Base VM:       $BASE_VM"
+echo "  Puppet branch: $PUPPET_BRANCH"
 echo ""
 
 cd "$(dirname "$0")"
@@ -72,6 +74,7 @@ packer build \
     -var "vm_name=${ROLE_VM}" \
     -var "puppet_role=${ROLE}" \
     -var "vault_file=${VAULT_FILE}" \
+    -var "puppet_branch=${PUPPET_BRANCH}" \
     puppet-setup-phase1.pkr.hcl
 
 # Phase 5: Puppet phase 2 (enables pipconf, final apply, hostname daemon)
