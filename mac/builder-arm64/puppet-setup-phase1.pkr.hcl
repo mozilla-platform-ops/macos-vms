@@ -89,7 +89,7 @@ build {
       "sudo sed -i '.bak' '/pipconf/s/^/#/' /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/roles_profiles/manifests/roles/${var.puppet_role}.pp || true",
 
       "echo 'Running Puppet (phase 1)...'",
-      "sudo /tmp/run-puppet.sh",
+      "sudo env PUPPET_BRANCH=${var.puppet_branch} /tmp/run-puppet.sh",
     ]
   }
 }
