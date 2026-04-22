@@ -45,6 +45,9 @@ jobs:
       - name: Set up PATH for Apple Silicon Homebrew
         run: echo "/opt/homebrew/bin" >> $GITHUB_PATH
 
+      - name: Kill any stuck tart build processes
+        run: pkill -9 -f "tart run sequoia-" 2>/dev/null || true
+
       - name: Checkout repo
         uses: actions/checkout@v4
 
@@ -134,6 +137,9 @@ jobs:
     steps:
       - name: Set up PATH for Apple Silicon Homebrew
         run: echo "/opt/homebrew/bin" >> $GITHUB_PATH
+
+      - name: Kill any stuck tart build processes
+        run: pkill -9 -f "tart run sequoia-" 2>/dev/null || true
 
       - name: Checkout repo
         uses: actions/checkout@v4

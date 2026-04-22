@@ -46,6 +46,9 @@ build {
       "echo 'Installing Xcode additional components...'",
       "sudo xcodebuild -runFirstLaunch",
 
+      "echo 'Disabling Spotlight indexing (prevents slow first-boot on clones)...'",
+      "sudo mdutil -a -i off",
+
       "echo 'Xcode 16.4 installed.'",
     ]
   }
