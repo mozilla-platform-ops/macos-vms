@@ -49,9 +49,10 @@ echo ""
 
 cd "$(dirname "$0")"
 
-# Phase 1 + 2: Shared base (create from IPSW + disable SIP)
+# Phase 1 + 2: Shared base (create from IPSW + install Xcode)
+# Builders do not need SIP disabled.
 # Skipped if base already exists unless REBUILD_BASE=true.
-# Caching the base saves ~17 min when building multiple roles in one session.
+# Caching the base saves significant time when building multiple roles in one session.
 BASE_EXISTS=$(tart list 2>/dev/null | awk '{print $1}' | grep -Fx "$BASE_VM" || true)
 if [[ -n "$BASE_EXISTS" && "$REBUILD_BASE" != "true" ]]; then
     echo "Base VM '$BASE_VM' exists — skipping base rebuild (set REBUILD_BASE=true to force)"
@@ -59,8 +60,8 @@ else
     echo "--- Phase 1: Creating base image from IPSW ---"
     packer build -force -var "vm_name=${BASE_VM}" create-base.pkr.hcl
 
-    echo "--- Phase 2: Disabling SIP ---"
-    packer build -force -var "vm_name=${BASE_VM}" disable-sip.pkr.hcl
+    echo "--- Phase 2: Installing Xcode 16.4 ---"
+    packer build -force -var "vm_name=${BASE_VM}" install-xcode.pkr.hcl
 fi
 
 # Phase 3: Clone base into role-specific VM
