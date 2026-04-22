@@ -105,7 +105,7 @@ jobs:
         if: success()
         run: |
           REGISTRY="${{ env.REGISTRY_HOST }}:${{ env.REGISTRY_PORT }}"
-          IMAGE="sequoia-gecko1b"
+          IMAGE="sequoia-gecko1b-vms"
           echo "Pushing ${IMAGE}:${BUILD_TAG} to ${REGISTRY}..."
           tart push ${{ env.TART_INSECURE }} ${IMAGE} ${REGISTRY}/${IMAGE}:${BUILD_TAG}
           tart push ${{ env.TART_INSECURE }} ${IMAGE} ${REGISTRY}/${IMAGE}:${ALIAS_TAG}
@@ -113,7 +113,7 @@ jobs:
       - name: Summary
         if: success()
         run: |
-          echo "Build complete: sequoia-gecko1b"
+          echo "Build complete: sequoia-gecko1b-vms"
           echo "  Registry: http://${{ env.REGISTRY_HOST }}:${{ env.REGISTRY_PORT }}/v2/"
           echo "  Tag:   $BUILD_TAG"
           echo "  Alias: $ALIAS_TAG"
@@ -188,7 +188,7 @@ jobs:
         if: success()
         run: |
           REGISTRY="${{ env.REGISTRY_HOST }}:${{ env.REGISTRY_PORT }}"
-          IMAGE="sequoia-gecko3b"
+          IMAGE="sequoia-gecko3b-vms"
           echo "Pushing ${IMAGE}:${BUILD_TAG} to ${REGISTRY}..."
           tart push ${{ env.TART_INSECURE }} ${IMAGE} ${REGISTRY}/${IMAGE}:${BUILD_TAG}
           tart push ${{ env.TART_INSECURE }} ${IMAGE} ${REGISTRY}/${IMAGE}:${ALIAS_TAG}
@@ -196,7 +196,7 @@ jobs:
       - name: Summary
         if: success()
         run: |
-          echo "Build complete: sequoia-gecko3b"
+          echo "Build complete: sequoia-gecko3b-vms"
           echo "  Registry: http://${{ env.REGISTRY_HOST }}:${{ env.REGISTRY_PORT }}/v2/"
           echo "  Tag:   $BUILD_TAG"
           echo "  Alias: $ALIAS_TAG"
