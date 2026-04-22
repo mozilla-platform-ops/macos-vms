@@ -43,11 +43,14 @@ build {
       "echo 'Accepting Xcode license...'",
       "sudo xcodebuild -license accept",
 
-      "echo 'Installing Xcode additional components...'",
-      "sudo xcodebuild -runFirstLaunch",
-
       "echo 'Disabling Spotlight indexing (prevents slow first-boot on clones)...'",
       "sudo mdutil -a -i off",
+
+      "echo 'Disabling software update checks...'",
+      "sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticCheckEnabled -bool false",
+      "sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticDownload -bool false",
+      "sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates -bool false",
+      "sudo defaults write /Library/Preferences/com.apple.commerce AutoUpdate -bool false",
 
       "echo 'Xcode 16.4 installed.'",
     ]
