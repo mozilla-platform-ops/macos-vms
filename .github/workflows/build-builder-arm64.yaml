@@ -110,6 +110,10 @@ jobs:
           tart push ${{ env.TART_INSECURE }} ${IMAGE} ${REGISTRY}/${IMAGE}:${BUILD_TAG}
           tart push ${{ env.TART_INSECURE }} ${IMAGE} ${REGISTRY}/${IMAGE}:${ALIAS_TAG}
 
+      - name: Clean up local gecko-1b VM
+        if: always()
+        run: tart delete sequoia-gecko1b-vms 2>/dev/null || true
+
       - name: Summary
         if: success()
         run: |
@@ -192,6 +196,10 @@ jobs:
           echo "Pushing ${IMAGE}:${BUILD_TAG} to ${REGISTRY}..."
           tart push ${{ env.TART_INSECURE }} ${IMAGE} ${REGISTRY}/${IMAGE}:${BUILD_TAG}
           tart push ${{ env.TART_INSECURE }} ${IMAGE} ${REGISTRY}/${IMAGE}:${ALIAS_TAG}
+
+      - name: Clean up local gecko-3b VM
+        if: always()
+        run: tart delete sequoia-gecko3b-vms 2>/dev/null || true
 
       - name: Summary
         if: success()
