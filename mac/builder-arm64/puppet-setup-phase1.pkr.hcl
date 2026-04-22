@@ -32,7 +32,7 @@ source "tart-cli" "puppet-setup-phase1" {
   disk_size_gb = 150
   ssh_password = "admin"
   ssh_username = "admin"
-  ssh_timeout  = "120s"
+  ssh_timeout  = "300s"
 }
 
 build {

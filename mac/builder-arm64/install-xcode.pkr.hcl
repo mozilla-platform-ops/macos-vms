@@ -24,7 +24,7 @@ source "tart-cli" "install-xcode" {
   disk_size_gb = 150
   ssh_password = "admin"
   ssh_username = "admin"
-  ssh_timeout  = "120s"
+  ssh_timeout  = "300s"
 }
 
 build {
