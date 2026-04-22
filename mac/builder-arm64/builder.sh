@@ -53,7 +53,7 @@ cd "$(dirname "$0")"
 # Builders do not need SIP disabled.
 # Skipped if base already exists unless REBUILD_BASE=true.
 # Caching the base saves significant time when building multiple roles in one session.
-BASE_EXISTS=$(tart list 2>/dev/null | awk '{print $1}' | grep -Fx "$BASE_VM" || true)
+BASE_EXISTS=$(tart list 2>/dev/null | awk 'NR>1 {print $2}' | grep -Fx "$BASE_VM" || true)
 if [[ -n "$BASE_EXISTS" && "$REBUILD_BASE" != "true" ]]; then
     echo "Base VM '$BASE_VM' exists — skipping base rebuild (set REBUILD_BASE=true to force)"
 else
