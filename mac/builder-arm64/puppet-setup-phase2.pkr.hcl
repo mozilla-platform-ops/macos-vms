@@ -51,6 +51,12 @@ build {
       "sudo systemsetup -setsleep Off 2>/dev/null",
       "sudo pmset -a sleep 0 displaysleep 0 disksleep 0 womp 0",
 
+      "echo 'Installing caffeinate LaunchDaemon...'",
+      "sudo tee /Library/LaunchDaemons/org.mozilla.caffeinate.plist > /dev/null << 'EOF'\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n    <key>Label</key>\n    <string>org.mozilla.caffeinate</string>\n    <key>ProgramArguments</key>\n    <array>\n        <string>/usr/bin/caffeinate</string>\n        <string>-i</string>\n        <string>-m</string>\n        <string>-s</string>\n    </array>\n    <key>RunAtLoad</key>\n    <true/>\n    <key>KeepAlive</key>\n    <true/>\n    <key>UserName</key>\n    <string>root</string>\n</dict>\n</plist>\nEOF",
+      "sudo chmod 644 /Library/LaunchDaemons/org.mozilla.caffeinate.plist",
+      "sudo chown root:wheel /Library/LaunchDaemons/org.mozilla.caffeinate.plist",
+      "sudo launchctl load /Library/LaunchDaemons/org.mozilla.caffeinate.plist",
+
       "echo 'Installing hostname LaunchDaemon...'",
       "sudo mv /tmp/set_hostname.sh /usr/local/bin/set_hostname.sh",
       "sudo chmod +x /usr/local/bin/set_hostname.sh",
