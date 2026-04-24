@@ -49,6 +49,7 @@ build {
       "sudo defaults write /Library/Preferences/com.apple.screensaver loginWindowIdleTime 0",
       "defaults -currentHost write com.apple.screensaver idleTime 0",
       "sudo systemsetup -setsleep Off 2>/dev/null",
+      "sudo pmset -a sleep 0 displaysleep 0 disksleep 0 womp 0",
 
       "echo 'Installing hostname LaunchDaemon...'",
       "sudo mv /tmp/set_hostname.sh /usr/local/bin/set_hostname.sh",
