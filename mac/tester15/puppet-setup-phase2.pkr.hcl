@@ -72,7 +72,7 @@ build {
 
       "sudo rm /var/root/vault.yaml",
 
-      "sudo mkdir /var/tmp/semaphore",
+      "sudo mkdir -p /var/tmp/semaphore",
       "sudo touch /var/tmp/semaphore/run-buildbot",
 
       "echo 'Finalizing setup. Ensuring clean exit...'",
