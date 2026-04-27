@@ -95,18 +95,39 @@ chmod +x "$TART_WRAPPER_DIR/tart"
 export PATH="$TART_WRAPPER_DIR:$PATH"
 echo "Tart wrapper installed at $TART_WRAPPER_DIR/tart (tart ip -> 127.0.0.1)"
 
+# Pre-packer network diagnostics: verify what is reachable from the runner subprocess.
+# Uses the REAL tart (not the wrapper) to get the VM's actual IP.
+# These run in the same process context as the proxy and packer.
+echo "--- Pre-packer network diagnostics ---"
+_diag_ip=$(/opt/homebrew/bin/tart ip --wait 90 "$ROLE_VM" 2>/dev/null || echo "")
+echo "[diag] VM IP (real tart):  ${_diag_ip:-NONE}"
+echo "[diag] bridge100:"
+ifconfig bridge100 2>/dev/null | grep -E '(flags|inet )' | head -3 || echo "(no bridge100)"
+echo "[diag] route to 192.168.64.x:"
+netstat -rn 2>/dev/null | grep -E '(192\.168\.64|bridge100)' || echo "(no route)"
+echo "[diag] ARP table:"
+arp -n 2>/dev/null | grep '192\.168\.64' || echo "(no entries)"
+if [[ -n "$_diag_ip" ]]; then
+    echo "[diag] nc -z to $_diag_ip:22 (5s timeout):"
+    nc -zv -w5 "$_diag_ip" 22 2>&1 && echo "[diag] nc: PASS" || echo "[diag] nc: FAIL"
+    echo "[diag] ping -c1 $_diag_ip:"
+    ping -c 1 -W 2000 "$_diag_ip" 2>&1 | tail -2 || true
+fi
+echo "--- End diagnostics ---"
+
 # Phase 4: Puppet phase 1 (installs packages, skips pipconf)
 echo "--- Phase 4: Puppet phase 1 (role: ${ROLE}) ---"
 
-# Background net-probe: test nc from runner shell every 15s while packer tries SSH.
-# Compares runner-shell vs packer-plugin-tart connectivity to same VM IP at same time.
+# Background net-probe: use REAL tart (not wrapper) to get the VM's actual IP,
+# then test nc from runner shell every 15s while packer tries SSH.
 # NOTE: must use direct & + $! pattern, NOT PID=$(func &; echo $!) — the latter hangs
 # because the background process inherits and keeps open the command-substitution pipe.
 (
     VM_NAME="$ROLE_VM"
+    REAL_TART=/opt/homebrew/bin/tart
     for _ in $(seq 1 60); do
         sleep 15
-        vm_ip=$(tart ip "$VM_NAME" 2>/dev/null || true)
+        vm_ip=$("$REAL_TART" ip "$VM_NAME" 2>/dev/null || true)
         if [[ -z "$vm_ip" ]]; then
             echo "[net-probe] VM $VM_NAME not yet running"
             continue
@@ -140,9 +161,10 @@ sleep 1
 echo "--- Phase 5: Puppet phase 2 ---"
 (
     VM_NAME="$ROLE_VM"
+    REAL_TART=/opt/homebrew/bin/tart
     for _ in $(seq 1 60); do
         sleep 15
-        vm_ip=$(tart ip "$VM_NAME" 2>/dev/null || true)
+        vm_ip=$("$REAL_TART" ip "$VM_NAME" 2>/dev/null || true)
         if [[ -z "$vm_ip" ]]; then
             echo "[net-probe] VM $VM_NAME not yet running"
             continue
