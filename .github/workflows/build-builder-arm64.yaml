@@ -94,7 +94,6 @@ jobs:
           ROLE: gecko_1_b_osx_arm64_vms
           REBUILD_BASE: ${{ inputs.rebuild_base || 'false' }}
           PUPPET_BRANCH: master
-          PACKER_LOG: 1
         run: |
           set -euo pipefail
           export VAULT_FILE=$(realpath "${VAULT_FILE}")
