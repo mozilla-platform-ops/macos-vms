@@ -29,6 +29,8 @@ source "tart-cli" "puppet-setup-phase2" {
   ssh_username = "admin"
   ssh_timeout  = "600s"
   headless     = true
+  ssh_host     = "127.0.0.1"
+  ssh_port     = 2222
 }
 
 build {
