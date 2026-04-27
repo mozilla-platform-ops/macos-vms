@@ -88,6 +88,25 @@ jobs:
             echo "Vault file not found at ${VAULT_FILE:-<unset>}"
           fi
 
+      - name: Pre-build network connectivity test
+        run: |
+          echo "Starting test VM to probe network from runner environment..."
+          tart clone sequoia-arm64-base sequoia-net-test 2>/dev/null || true
+          tart run sequoia-net-test --no-graphics &>/tmp/nettest.log &
+          TART_PID=$!
+          sleep 15
+          VM_IP=$(tart ip --wait 30 sequoia-net-test 2>&1)
+          echo "Test VM IP: $VM_IP"
+          echo "Route table (192.168.x):"
+          netstat -rn | grep '192\.168' || echo "no 192.168 routes"
+          echo "nc test from runner shell:"
+          nc -zv -w 5 $VM_IP 22 && echo "nc: PASS" || echo "nc: FAIL"
+          kill $TART_PID 2>/dev/null || true
+          sleep 3
+          tart delete sequoia-net-test 2>/dev/null || true
+          sleep 3
+          echo "Pre-build test complete"
+
       - name: Build gecko-1b image
         working-directory: mac/builder-arm64
         env:
