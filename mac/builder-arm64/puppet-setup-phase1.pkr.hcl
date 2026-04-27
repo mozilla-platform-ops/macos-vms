@@ -53,7 +53,7 @@ build {
       "sudo defaults write /Library/Preferences/com.apple.commerce AutoUpdate -bool false",
 
       "echo 'Installing Rosetta 2...'",
-      "sudo softwareupdate --install-rosetta --agree-to-license",
+      "sudo softwareupdate --install-rosetta --agree-to-license || echo 'Rosetta already installed or unavailable, continuing'",
 
       "echo 'Ensuring system paths exist...'",
       "sudo mkdir -p /usr/local/bin/",
