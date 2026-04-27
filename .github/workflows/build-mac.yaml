@@ -22,6 +22,12 @@ jobs:
     runs-on: self-hosted
 
     steps:
+      - name: Set up PATH for Apple Silicon Homebrew
+        run: echo "/opt/homebrew/bin" >> $GITHUB_PATH
+
+      - name: Kill any stuck tart build processes
+        run: pkill -9 -f "tart run sequoia-" 2>/dev/null || true
+
       - name: Checkout repo
         uses: actions/checkout@v4
 
@@ -117,6 +123,10 @@ jobs:
         run: |
           echo "🪶 Tagging ${IMAGE}:${ALIAS_TAG} to ${REGISTRY} ..."
           tart push $TART_INSECURE ${IMAGE} ${REGISTRY}/${IMAGE}:${ALIAS_TAG}
+
+      - name: Clean up local tester VM
+        if: always()
+        run: /opt/homebrew/bin/tart delete sequoia-tester 2>/dev/null || true
 
       - name: Summary
         if: ${{ success() }}
