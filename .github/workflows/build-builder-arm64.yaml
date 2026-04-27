@@ -59,7 +59,7 @@ jobs:
       - name: Determine vault and tags
         id: determine
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == "main" ]]; then
+          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
             echo "ALIAS_TAG=gecko1b-prod-latest" >> $GITHUB_ENV
             echo "BUILD_TAG=gecko1b-prod-${GITHUB_SHA}" >> $GITHUB_ENV
           else
@@ -69,7 +69,7 @@ jobs:
           fi
 
       - name: Stage real vault (main branch only)
-        if: github.event_name == 'push' && github.ref_name == 'main'
+        if: github.ref_name == 'main'
         run: |
           # gecko_1 and gecko_3 have different TC client IDs / access tokens,
           # so each role has its own vault file on the runner.
@@ -150,7 +150,7 @@ jobs:
 
       - name: Determine vault and tags
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == "main" ]]; then
+          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
             echo "ALIAS_TAG=gecko3b-prod-latest" >> $GITHUB_ENV
             echo "BUILD_TAG=gecko3b-prod-${GITHUB_SHA}" >> $GITHUB_ENV
           else
@@ -160,7 +160,7 @@ jobs:
           fi
 
       - name: Stage real vault (main branch only)
-        if: github.event_name == 'push' && github.ref_name == 'main'
+        if: github.ref_name == 'main'
         run: |
           install -m 600 /etc/ronin/vault-gecko3b.yaml "${GITHUB_WORKSPACE}/mac/builder-arm64/vault-gecko3b.yaml"
           echo "VAULT_FILE=${GITHUB_WORKSPACE}/mac/builder-arm64/vault-gecko3b.yaml" >> $GITHUB_ENV
