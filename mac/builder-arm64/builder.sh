@@ -79,14 +79,14 @@ cat > "$TART_WRAPPER_DIR/tart" << 'TART_WRAPPER_EOF'
 #!/bin/bash
 REAL_TART=/opt/homebrew/bin/tart
 if [[ "$1" == "ip" ]]; then
-    for _ in $(seq 1 120); do
-        real_ip=$("$REAL_TART" ip "$2" 2>/dev/null || true)
-        if [[ -n "$real_ip" && "$real_ip" == *.* ]]; then
-            echo "127.0.0.1"
-            exit 0
-        fi
-        sleep 2
-    done
+    # packer-plugin-tart calls: tart ip --wait 120 <vm_name>
+    # Pass ALL args to real tart unchanged; replace the returned IP with 127.0.0.1
+    # so packer connects through our proxy instead of the unreachable bridge100 address.
+    real_ip=$("$REAL_TART" "$@" 2>/dev/null || true)
+    if [[ -n "$real_ip" && "$real_ip" == *.* ]]; then
+        echo "127.0.0.1"
+        exit 0
+    fi
     exit 1
 fi
 exec "$REAL_TART" "$@"
