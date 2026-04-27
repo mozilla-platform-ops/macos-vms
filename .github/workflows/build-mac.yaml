@@ -4,8 +4,14 @@ on:
   pull_request:
     branches: [ main ]
     types: [opened, synchronize, reopened]
+    paths:
+      - 'mac/tester15/**'
+      - '.github/workflows/build-mac.yaml'
   push:
     branches: [ main ]
+    paths:
+      - 'mac/tester15/**'
+      - '.github/workflows/build-mac.yaml'
   
 concurrency:
   group: ${{ github.workflow }}
