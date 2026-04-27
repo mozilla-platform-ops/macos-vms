@@ -33,6 +33,7 @@ source "tart-cli" "puppet-setup-phase1" {
   ssh_password = "admin"
   ssh_username = "admin"
   ssh_timeout  = "600s"
+  headless     = true
 }
 
 build {
