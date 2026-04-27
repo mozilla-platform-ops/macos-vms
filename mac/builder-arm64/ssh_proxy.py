@@ -3,18 +3,18 @@
 Bidirectional TCP proxy: 127.0.0.1:PORT -> VM_NAME:22 via /usr/bin/nc.
 
 packer-plugin-tart cannot reach bridge100 VMs from the GitHub Actions runner
-process hierarchy (EHOSTUNREACH immediately, even though nc from an interactive
-SSH session or bash subprocess can reach the same IP). /usr/bin/nc is a macOS
-platform binary with implicit bridge100 routing access; Homebrew Python does not
-have this access. This proxy accepts packer's SSH connection on loopback and
-forwards it to the VM via an /usr/bin/nc subprocess.
+process hierarchy (EHOSTUNREACH). /usr/bin/nc is a macOS platform binary with
+implicit bridge100 routing access; Homebrew Python does not have it.
+
+For each packer SSH connection, this proxy accepts on loopback, then spawns
+/usr/bin/nc with the packer socket fd wired directly to nc's stdin/stdout.
+nc handles all bidirectional I/O — no Python threading or pipe buffering.
 
 Usage: python3 ssh_proxy.py <vm_name> [listen_port]
 """
 import socket
 import subprocess
 import sys
-import threading
 import time
 
 REAL_TART = "/opt/homebrew/bin/tart"
@@ -47,62 +47,23 @@ def handle(client, vm_name):
 
     print(f"[proxy] Connecting to {vm_ip}:22 via {NC}...", flush=True)
     try:
+        # Pass the packer socket fd directly to nc's stdin and stdout.
+        # nc handles all bidirectional I/O between packer and the VM's sshd
+        # without going through Python pipes — avoids buffering/threading issues.
+        sock_fd = client.fileno()
         proc = subprocess.Popen(
             [NC, vm_ip, "22"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
+            stdin=sock_fd,
+            stdout=sock_fd,
             stderr=subprocess.DEVNULL,
         )
+        print(f"[proxy] PASS: nc started for {vm_ip}:22 (pid={proc.pid})", flush=True)
+        proc.wait()
+        print(f"[proxy] Connection to {vm_ip}:22 closed (rc={proc.returncode})", flush=True)
     except Exception as e:
-        print(f"[proxy] FAIL: nc start failed for {vm_ip}:22: {e}", flush=True)
+        print(f"[proxy] FAIL: {vm_ip}:22: {e}", flush=True)
+    finally:
         client.close()
-        return
-
-    print(f"[proxy] PASS: nc connected to {vm_ip}:22", flush=True)
-
-    def client_to_nc():
-        try:
-            while True:
-                data = client.recv(4096)
-                if not data:
-                    break
-                proc.stdin.write(data)
-                proc.stdin.flush()
-        except Exception:
-            pass
-        finally:
-            try:
-                proc.stdin.close()
-            except Exception:
-                pass
-
-    def nc_to_client():
-        try:
-            while True:
-                data = proc.stdout.read(4096)
-                if not data:
-                    break
-                client.sendall(data)
-        except Exception:
-            pass
-        finally:
-            try:
-                client.shutdown(socket.SHUT_WR)
-            except Exception:
-                pass
-
-    t1 = threading.Thread(target=client_to_nc, daemon=True)
-    t2 = threading.Thread(target=nc_to_client, daemon=True)
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-    client.close()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-    print(f"[proxy] Connection to {vm_ip}:22 closed", flush=True)
 
 
 if __name__ == "__main__":
@@ -111,6 +72,9 @@ if __name__ == "__main__":
         sys.exit(1)
     vm_name = sys.argv[1]
     port = int(sys.argv[2]) if len(sys.argv) > 2 else 2222
+
+    import threading
+
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", port))
