@@ -69,6 +69,32 @@ echo "--- Phase 3: Cloning base into ${ROLE_VM} ---"
 tart delete "$ROLE_VM" 2>/dev/null || true
 tart clone "$BASE_VM" "$ROLE_VM"
 
+# Tart wrapper: packer-plugin-tart overrides ssh_host by calling 'tart ip' and using the
+# result directly, ignoring ssh_host in the packer HCL. The bridge100 VM IP is unreachable
+# from packer-plugin-tart's process context (EHOSTUNREACH), but reachable from the runner
+# shell. This wrapper intercepts 'tart ip' to return 127.0.0.1 — routing packer's SSH
+# through our Python proxy (127.0.0.1:2222 -> VM:22) which runs in the shell context.
+TART_WRAPPER_DIR=$(mktemp -d)
+cat > "$TART_WRAPPER_DIR/tart" << 'TART_WRAPPER_EOF'
+#!/bin/bash
+REAL_TART=/opt/homebrew/bin/tart
+if [[ "$1" == "ip" ]]; then
+    for _ in $(seq 1 120); do
+        real_ip=$("$REAL_TART" ip "$2" 2>/dev/null || true)
+        if [[ -n "$real_ip" && "$real_ip" == *.* ]]; then
+            echo "127.0.0.1"
+            exit 0
+        fi
+        sleep 2
+    done
+    exit 1
+fi
+exec "$REAL_TART" "$@"
+TART_WRAPPER_EOF
+chmod +x "$TART_WRAPPER_DIR/tart"
+export PATH="$TART_WRAPPER_DIR:$PATH"
+echo "Tart wrapper installed at $TART_WRAPPER_DIR/tart (tart ip -> 127.0.0.1)"
+
 # Phase 4: Puppet phase 1 (installs packages, skips pipconf)
 echo "--- Phase 4: Puppet phase 1 (role: ${ROLE}) ---"
 
@@ -141,5 +167,6 @@ packer build \
     puppet-setup-phase2.pkr.hcl
 kill "$NET_PROBE_PID" "$SSH_PROXY_PID" 2>/dev/null || true
 
+rm -rf "$TART_WRAPPER_DIR"
 echo ""
 echo "Build complete: ${ROLE_VM}"
