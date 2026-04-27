@@ -33,6 +33,12 @@ source "tart-cli" "puppet-setup-phase1" {
   ssh_password = "admin"
   ssh_username = "admin"
   ssh_timeout  = "600s"
+  headless     = true
+  # Route SSH through the local proxy (127.0.0.1:2222 -> VM:22).
+  # packer-plugin-tart gets EHOSTUNREACH on bridge100 from the runner process
+  # hierarchy; the Python proxy runs from the runner shell which can reach it.
+  ssh_host     = "127.0.0.1"
+  ssh_port     = 2222
 }
 
 build {
