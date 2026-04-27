@@ -27,8 +27,8 @@ variable "puppet_branch" {
 
 source "tart-cli" "puppet-setup-phase1" {
   vm_name      = var.vm_name
-  cpu_count    = 8
-  memory_gb    = 12
+  cpu_count    = 6
+  memory_gb    = 8
   disk_size_gb = 150
   ssh_password = "admin"
   ssh_username = "admin"
