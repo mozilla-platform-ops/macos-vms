@@ -91,8 +91,7 @@ jobs:
         env:
           ROLE: gecko_1_b_osx_arm64_vms
           REBUILD_BASE: ${{ inputs.rebuild_base || 'false' }}
-          # Use the test branch until the ronin_puppet PR is merged
-          PUPPET_BRANCH: gecko-arm64-vms-roles
+          PUPPET_BRANCH: master
         run: |
           set -euo pipefail
           export VAULT_FILE=$(realpath "${VAULT_FILE}")
@@ -181,8 +180,7 @@ jobs:
           ROLE: gecko_3_b_osx_arm64_vms
           # Base was already built by gecko-1b job; skip rebuild unless forced
           REBUILD_BASE: "false"
-          # Use the test branch until the ronin_puppet PR is merged
-          PUPPET_BRANCH: gecko-arm64-vms-roles
+          PUPPET_BRANCH: master
         run: |
           set -euo pipefail
           export VAULT_FILE=$(realpath "${VAULT_FILE}")
