@@ -40,7 +40,7 @@ else
     scutil --set HostName "$HOSTNAME"
     
     # Flush caches and refresh Bonjour/mDNSResponder
-    dscacheutil -flushcache
+    dscacheutil -flushcache || true
     killall -HUP mDNSResponder 2>/dev/null || true
     
     echo "✅ New Hostname: $(scutil --get HostName)"
@@ -80,5 +80,10 @@ if [[ -f "$GW_CONFIG" ]]; then
 else
     echo "⚠️ No generic-worker config found at $GW_CONFIG"
 fi
+
+# Create semaphore file that the worker-runner LaunchDaemon watches via PathState.
+# Without this file, org.mozilla.worker-runner will not start (KeepAlive.PathState).
+mkdir -p /var/tmp/semaphore
+touch /var/tmp/semaphore/run-buildbot
 
 echo "🏁 Hostname configuration complete."
