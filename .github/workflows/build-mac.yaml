@@ -50,7 +50,7 @@ jobs:
           echo "Event: ${GITHUB_EVENT_NAME}"
           echo "Ref: ${GITHUB_REF_NAME}"
 
-          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_NAME}" == "main" ]]; then
+          if [[ ( "${GITHUB_EVENT_NAME}" == "push" || "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ) && "${GITHUB_REF_NAME}" == "main" ]]; then
             echo "Using real vault for main build"
             echo "ALIAS_TAG=prod-latest" >> $GITHUB_ENV
             echo "BUILD_TAG=prod-${GITHUB_SHA}" >> $GITHUB_ENV
@@ -67,9 +67,9 @@ jobs:
           cat $GITHUB_ENV | grep -E 'VAULT_FILE|BUILD_TAG|ALIAS_TAG' || true
           echo ""
 
-      # Stage the real vault into the workspace (only on push→main)
+      # Stage the real vault into the workspace (on push→main or workflow_dispatch→main)
       - name: Stage real vault into workspace
-        if: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+        if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == 'main' }}
         run: |
           # Copy from the runner's secure location into the workspace
           install -m 600 /etc/ronin/vault-real.yaml "${GITHUB_WORKSPACE}/mac/tester15/vault-real.yaml"
