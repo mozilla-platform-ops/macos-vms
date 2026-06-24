@@ -2,18 +2,15 @@ name: Build macOS VM (PR and Main)
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches: [ main ]
-    types: [opened, synchronize, reopened]
-    paths:
-      - 'mac/tester15/**'
-      - '.github/workflows/build-mac.yaml'
+  # SECURITY (Bug 2049579): do NOT trigger on pull_request. This job runs on a
+  # non-ephemeral self-hosted runner; a fork PR would execute attacker-controlled
+  # code there. Build only from trusted base-repo refs (push to main / dispatch).
   push:
     branches: [ main ]
     paths:
       - 'mac/tester15/**'
       - '.github/workflows/build-mac.yaml'
-  
+
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
