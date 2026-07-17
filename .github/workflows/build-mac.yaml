@@ -126,6 +126,29 @@ jobs:
           curl -fsSL http://${{ env.REGISTRY_HOST }}:${{ env.REGISTRY_PORT }}/v2/ || \
             echo "⚠️ Registry reachable but returned non-200"
 
+      # `tart login` stores the builder credential in the login keychain, but
+      # the build host auto-logs-in at boot, and autologin does NOT unlock the
+      # login keychain — so tart login fails with
+      #   "Keychain failed to add item: User interaction is not allowed."
+      # The unlock is per-security-session, so a manual `security unlock-keychain`
+      # in an SSH/console shell does NOT reach the runner's session — it has to
+      # happen here, in the same session as tart login. Needs a KEYCHAIN_PASSWORD
+      # repo secret (= the runner admin account's login password).
+      - name: Unlock login keychain for tart login
+        if: ${{ success() }}
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          if [ -z "${KEYCHAIN_PASSWORD}" ]; then
+            echo "❌ KEYCHAIN_PASSWORD secret not set — tart login needs an unlocked login keychain"
+            exit 1
+          fi
+          KC="$HOME/Library/Keychains/login.keychain-db"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "$KC"
+          # Keep it unlocked for the rest of the job (no idle/sleep relock mid-build).
+          security set-keychain-settings -t 7200 "$KC"
+          echo "🔓 login keychain unlocked for this runner session"
+
       # The registry now enforces authenticated push (anon pull / auth push,
       # Bug 2049579 rec #4). Log in with the builder credential from a repo
       # secret before pushing. Pulls (tester hosts) stay anonymous.
