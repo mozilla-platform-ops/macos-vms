@@ -39,4 +39,21 @@ echo "installed injected vault ($(/usr/bin/wc -c < /var/root/vault.yaml | /usr/b
   https://ronin-puppet-package-repo.s3.us-west-2.amazonaws.com/macos/public/common/run-puppet.sh
 /bin/chmod +x /tmp/run-puppet.sh
 /tmp/run-puppet.sh || echo "run-puppet finished with errors (continuing)"
+
+# The generic-worker is started by cltbld's autologin session at boot, which
+# happens BEFORE this daemon finishes. So on the very first boot the worker comes
+# up reading the BAKED (fake-vault) credentials, and claimWork fails with
+# "AuthenticationFailed: Bad mac". puppet has now (re)written the worker config
+# with the REAL injected creds, but a running generic-worker doesn't re-read it.
+# Reboot ONCE so the worker restarts against the correct config; guarded by a
+# semaphore so we never reboot-loop (on every later boot the persisted config is
+# already correct, so the worker starts clean and no reboot is needed).
+REBOOT_SEM="/var/root/.vault-inject-rebooted"
+if [ ! -f "${REBOOT_SEM}" ]; then
+  /usr/bin/touch "${REBOOT_SEM}"
+  echo "first-boot injection complete — rebooting once so generic-worker picks up the real credentials"
+  echo "=== vault-inject done (pre-reboot) $(date -u +%FT%TZ) ==="
+  /sbin/reboot
+  exit 0
+fi
 echo "=== vault-inject done $(date -u +%FT%TZ) ==="
