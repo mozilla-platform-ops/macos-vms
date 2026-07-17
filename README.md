@@ -206,17 +206,42 @@ runner, never in the image.
 
 ---
 
-## 📦 Deployment
+## 📦 Deployment & Rollout
 
 Tart worker hosts are Puppet-managed (`roles_profiles::roles::tart_worker` /
-`profiles::tart`). Puppet installs Tart, pulls `sequoia-tester:prod-latest`
-(anonymous pull), clones VMs (Apple licensing caps at **2 VMs per host**), and
-keeps them running via LaunchDaemons. When `inject_vault` is enabled for the
-host, the launch wrapper performs the host-mediated vault fetch described above.
+`profiles::tart`), which installs Tart, deploys the worker LaunchDaemon(s), and —
+with `tart.inject_vault: true` — the launch wrapper (`tart-run-vm.sh`) that
+fetches the per-pool vault over mTLS using the host's SCEP cert and shares it
+into each VM (`tart run --dir=vault:…`). On macOS 15 puppet does **not**
+pull/clone the image (`manage_image: false`) — `tart pull` needs a GUI/Local-
+Network context — so image lifecycle is handled by the update script below.
+Apple licensing caps a host at **2 VMs**.
 
-To roll a new image onto a host: pull the new `prod-latest`, recreate the VMs,
-and restart the worker daemon. Graceful fleet-wide rollout automation is
-tracked separately; for now this is done per host.
+### How a host gets a new image
+
+`tart.oci_tag` in the host's role data selects the image — pin a specific
+`prod-<sha>` for a controlled fleet, or track the moving `prod-latest`. Rolling
+it out runs **`/usr/local/bin/tart-update-vms.sh`** on the host, which:
+
+1. pulls the selected image,
+2. rolls **one worker slot at a time** so the other keeps serving,
+3. **drains** each slot first — waits for its worker to finish its current task
+   (via the Taskcluster public API, no creds) before recreating it,
+4. recreates the VM and restarts its worker unit (daemon- and agent-aware).
+
+Each recreated VM self-configures on first boot: `set_hostname` → `vault-inject`
+reads the injected vault → puppet regenerates the worker config with the **real**
+credentials → a one-time **auto-reboot** so generic-worker starts on those creds
+→ the worker registers and claims tasks. (Validated end-to-end on m4-235:
+`mac-f4a3ef` built → injected → registered → ran a live `mochitest-chrome`.)
+
+### Fleet rollout
+
+Driving the per-host update across the fleet — batched to respect the MDC1
+network, with TC quarantine for a true drain — is the **on-network reprovision
+runner's** job, optionally triggered and observed from **Hangar** (same pattern
+as the reprovision action; Hangar shows image drift + fires the roll, the runner
+does the work). The per-host script above is the safe primitive that layer calls.
 
 ---
 
