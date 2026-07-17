@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mozilla.build-runner-maintenance</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/usr/local/bin/build-runner-maintenance.sh</string>
+    </array>
+    <!-- Runs as admin: tart's OCI cache lives in the admin user's ~/.tart, so
+         prune must run as that user to see and clear it. -->
+    <key>UserName</key>
+    <string>admin</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StartInterval</key>
+    <integer>3600</integer>
+    <key>StandardOutPath</key>
+    <string>/var/log/build-runner-maintenance.out</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/build-runner-maintenance.err</string>
+</dict>
+</plist>
