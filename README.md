@@ -1,69 +1,106 @@
 # 🖥️ macOS CI Virtual Machine Builder
 
-**Automated, repeatable, production-ready macOS VM images for CI/CD workflows.**
+**Automated, repeatable, credential-free macOS VM images for Firefox CI.**
 
-Built with Packer + Tart + Puppet, orchestrated through GitHub Actions, and deployed to an OCI registry. This system provisions fully-configured macOS VMs that mirror bare-metal hardware workers, complete with dynamic hostnames, TaskCluster integration, and automatic configuration management.
+Built with Packer + Tart + Puppet, orchestrated through GitHub Actions, and
+distributed via an OCI registry. This system produces fully-configured macOS
+VMs that mirror bare-metal hardware workers — dynamic hostnames, Taskcluster
+integration, and Puppet-managed configuration — **without ever baking a worker
+secret into the image or exposing one to the build runner.**
 
 ---
 
 ## 🎯 What This Does
 
-This repository automates the entire lifecycle of macOS CI virtual machines:
+1. **Builds golden images** from Apple IPSW files using Packer.
+2. **Configures them** with Puppet (using a non-secret *fake* vault at build time).
+3. **Stores them** in an OCI registry (anonymous pull, authenticated push).
+4. **Deploys them** on Puppet-managed Tart worker hosts.
+5. **Injects real credentials at VM boot** — the host, not the image, supplies
+   the worker's Taskcluster vault.
 
-1. **Builds golden images** from Apple IPSW files using Packer
-2. **Configures them** with Puppet (including secrets management via vault files)
-3. **Stores them** in a local OCI registry
-4. **Deploys them** automatically on Tart worker hosts
-5. **Manages them** through Puppet for ongoing configuration drift prevention
+**Key features:**
+- 🔒 **Credential-free images** — no worker secret is ever baked in or present on the build runner.
+- 🧩 **Host-mediated secret injection** — the MDM-enrolled Tart host fetches the per-pool vault and shares it into each VM at launch.
+- 🏷️ **Dynamic hostnames** — VMs self-configure a unique identity from their MAC address.
+- 📦 **OCI distribution** — images tagged `prod-latest` / `prod-{sha}`, anon-pull / auth-push.
+- 🤖 **Worker automation** — Puppet-managed Tart hosts deploy and keep VMs running.
 
-**Key Features:**
-- 🔄 **CI/CD Integration**: Automatic builds on PR (fake vault) and main branch (real vault)
-- 🏷️ **Dynamic Hostnames**: VMs self-configure unique identities based on MAC addresses
-- 🔐 **Secrets Management**: Vault-based credential injection during build
-- 🎛️ **Four-Phase Build**: Base → SIP Disable → Puppet Phase 1 → Puppet Phase 2
-- 📦 **OCI Distribution**: Images stored in registry with prod/PR tagging
-- 🤖 **Worker Automation**: Puppet-managed Tart workers that auto-pull and deploy VMs
+---
+
+## 🔐 Security Model (read this first)
+
+This repo was the subject of **Bug 2049579**: an earlier version ran fork-PR
+code on a non-ephemeral self-hosted macOS runner that also held plaintext
+Taskcluster worker vaults. The build has since been re-architected so that
+**neither the runner nor the image ever holds a worker secret.** The controls
+below are load-bearing — do not regress them:
+
+1. **No fork-PR execution on the self-hosted runner.** The build triggers on
+   `push` to `main` and `workflow_dispatch` only — never `pull_request`. A fork
+   PR must not be able to run code on the build host.
+2. **Credential-free images.** Every build uses the non-secret
+   `mac/tester15/vault-fake.yaml`. Real worker credentials are **never** copied
+   onto the runner or baked into the image.
+3. **Host-mediated credential injection.** Real credentials reach a VM only at
+   **first boot**, supplied by the Tart *host* (see below). The image ships with
+   no usable secret.
+4. **Authenticated registry push.** The OCI registry allows anonymous *pull*
+   (tester hosts) but requires authentication to *push*. The build logs in with
+   a `builder` credential from a GitHub Actions secret before pushing.
+
+If you change the workflow triggers, the vault handling, or the registry auth,
+you are touching the security boundary — get it reviewed as such.
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    GitHub Actions (Builder)                 │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐   │
-│  │  PR Build    │    │  Main Build  │    │  Push to OCI │   │
-│  │ (Fake Vault) │───▶│ (Real Vault) │───▶│   Registry   │   │
-│  └──────────────┘    └──────────────┘    └──────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                  GitHub Actions (self-hosted)                 │
+│   push to main / workflow_dispatch                            │
+│   ┌───────────────────────┐    ┌──────────────────────────┐  │
+│   │  Build (fake vault,    │──▶ │  Push to OCI registry     │  │
+│   │  credential-free)      │    │  (auth: builder secret)   │  │
+│   └───────────────────────┘    └──────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘
                                │
                                ▼
                     ┌─────────────────────┐
-                    │   OCI Registry      │
-                    │  10.49.56.161:5000  │
+                    │   OCI Registry      │   anon pull / auth push
                     │                     │
                     │  sequoia-tester:    │
                     │  - prod-latest      │
                     │  - prod-{sha}       │
-                    │  - pr-{n}-latest    │
                     └─────────────────────┘
-                               │
+                               │  (host pulls)
+                               ▼
+        ┌────────────────────────────────────────────┐
+        │        Tart Worker Host (MDM-enrolled)      │
+        │                                             │
+        │  1. holds a broker client cert (via MDM)    │
+        │  2. fetches the per-pool vault over mTLS    │
+        │  3. shares it into each VM at launch:        │
+        │       tart run --dir=vault:<dir>:ro         │
+        │                                             │
+        │   ┌───────────────┐   ┌───────────────┐     │
+        │   │ credential-    │   │ credential-    │    │
+        │   │ free VM #1     │   │ free VM #2     │    │
+        │   └───────────────┘   └───────────────┘     │
+        └────────────────────────────────────────────┘
+                               │  (VM first boot reads the shared vault,
+                               │   runs puppet, registers)
                                ▼
                     ┌─────────────────────┐
-                    │  Tart Worker Hosts  │
-                    │  (Puppet-managed)   │
-                    │                     │
-                    │  Runs 2 VMs each:   │
-                    │  - sequoia-tester-1 │
-                    │  - sequoia-tester-2 │
-                    └─────────────────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │   TaskCluster       │
-                    │  (CI Orchestration) │
+                    │     Taskcluster     │
                     └─────────────────────┘
 ```
+
+The **image is credential-free**; the **host** is the trust anchor (its MDM
+identity authorizes the vault fetch). See `ronin_puppet`'s `profiles::tart`
+(`inject_vault` / `vault_role`) for the host side, and `vault-inject.sh` for the
+guest side.
 
 ---
 
@@ -71,16 +108,24 @@ This repository automates the entire lifecycle of macOS CI virtual machines:
 
 ```
 macos-vms/
-├── .github/workflows/build.yml              # CI/CD pipeline
-└── mac/tester15/
-    ├── builder.sh                           # Main build orchestrator
-    ├── create-base.pkr.hcl                  # Phase 1: Base macOS installation
-    ├── disable-sip.pkr.hcl                  # Phase 2: Disable SIP
-    ├── puppet-setup-phase1.pkr.hcl          # Phase 3: Initial Puppet run
-    ├── puppet-setup-phase2.pkr.hcl          # Phase 4: Final Puppet run
-    ├── set_hostname.sh                      # Dynamic hostname configuration
-    ├── com.mozilla.sethostname.plist        # LaunchDaemon for hostname
-    └── vault-fake.yaml                      # Test credentials (safe to commit)
+├── .github/workflows/
+│   └── build-mac.yaml                      # CI/CD pipeline (push-to-main / dispatch)
+├── scripts/                                # build-host operational tooling
+│   ├── setup-build-runner.sh               #   reproducible runner (re)install
+│   ├── build-runner-maintenance.sh         #   hourly tart prune + low-disk alert
+│   └── com.mozilla.build-runner-maintenance.plist
+├── mac/tester15/                           # the tester VM image
+│   ├── builder.sh                          #   4-phase build orchestrator
+│   ├── create-base.pkr.hcl                 #   Phase 1: base macOS from IPSW
+│   ├── disable-sip.pkr.hcl                 #   Phase 2: disable SIP (guest)
+│   ├── puppet-setup-phase1.pkr.hcl         #   Phase 3: puppet run 1
+│   ├── puppet-setup-phase2.pkr.hcl         #   Phase 4: puppet run 2 + first-boot hooks
+│   ├── set_hostname.sh                     #   dynamic hostname (LaunchDaemon)
+│   ├── com.mozilla.sethostname.plist
+│   ├── vault-inject.sh                     #   FIRST-BOOT: read host-shared vault → puppet
+│   ├── com.mozilla.vault-inject.plist
+│   └── vault-fake.yaml                     #   non-secret build-time vault (safe to commit)
+└── mac/builder-arm64/                      # (separate) arm64 builder-image variant
 ```
 
 ---
@@ -90,248 +135,175 @@ macos-vms/
 ### Prerequisites
 
 ```bash
-# Install required tools
 brew tap hashicorp/tap cirruslabs/cli
 brew install hashicorp/tap/packer cirruslabs/cli/tart ansible
 ```
 
-### Local Development Build
+### Local development build
+
+Always builds credential-free with the fake vault — no secrets required:
 
 ```bash
 cd mac/tester15
-
-# Use the fake vault for testing (no secrets required)
-./builder.sh
-
-# Or specify a custom vault
-export VAULT_FILE="/path/to/your/vault.yaml"
 ./builder.sh
 ```
 
-### CI/CD Pipeline
+### CI/CD
 
-**Pull Requests** → Builds with `vault-fake.yaml`, pushes to `pr-{number}-latest`
+The build runs **only** on `push` to `main` (paths under `mac/tester15/**` or
+the workflow) and on manual `workflow_dispatch`. There is intentionally **no**
+`pull_request` trigger (see Security Model). Every run:
 
-**Main Branch** → Builds with real vault from `/etc/ronin/vault-real.yaml`, pushes to `prod-latest` and `prod-{sha}`
+- builds credential-free with `vault-fake.yaml`;
+- logs in to the registry with the `builder` secret and pushes
+  `sequoia-tester:prod-{sha}` + `sequoia-tester:prod-latest`.
 
 ---
 
 ## 🔨 Build Process
 
-### Phase 1: Create Base Image (~12-15 min)
+`builder.sh` runs four Packer phases:
 
-Fully automated macOS installation from IPSW:
-- Downloads and installs macOS 15.3 (Sequoia)
-- Creates admin user with password `admin`
-- Enables SSH and Screen Sharing
-- Automated keyboard navigation through setup wizard
+### Phase 1 — Create base image
+Installs macOS (Sequoia) from an IPSW and drives Setup Assistant via automated
+VNC keystrokes (creates the `admin` account, enables SSH + Screen Sharing).
+This phase is the slowest and, because it relies on timed blind keystrokes, the
+**most flake-prone** — an SSH-timeout here is usually the Setup Assistant
+automation drifting out of sync, not a real failure. Re-run first.
 
-### Phase 2: Disable SIP (~2 min)
+### Phase 2 — Disable SIP (guest)
+Boots the *guest* into Recovery and runs `csrutil disable`. This affects the VM
+image only, not any host.
 
-- Boots into macOS Recovery
-- Disables System Integrity Protection via `csrutil disable`
-- Required for certain CI tools and Puppet configurations
+### Phase 3 — Puppet setup, run 1
+Sets the puppet role `gecko_t_osx_1500_m_vms`, installs Rosetta 2, Xcode CLT,
+and the Puppet agent, temporarily disables the TCC/SafariDriver/pipconf bits
+that need a reboot, and runs the first apply — all using the **fake** vault.
 
-### Phase 3: Puppet Setup Phase 1 (~7 min)
-
-Initial system configuration:
-- **Vault injection:** Copies vault file to `/var/root/vault.yaml`
-- Installs Rosetta 2, Xcode Command Line Tools, Puppet Agent
-- Sets puppet role: `gecko_t_osx_1500_m_vms`
-- **Temporarily disables** TCC permissions, SafariDriver, and pipconf (requires reboot)
-- Runs initial Puppet apply
-
-**Why two phases?** Some Puppet modules (TCC, SafariDriver) require a reboot to apply correctly.
-
-### Phase 4: Puppet Setup Phase 2 (~2-3 min)
-
-Final configuration:
-- Sets up dynamic hostname script and LaunchDaemon
-- **Re-enables** TCC permissions, SafariDriver, and pipconf
-- Runs final Puppet apply with full configuration
-- Removes vault file for security
-
-**Total Build Time:** ~27 minutes
+### Phase 4 — Puppet setup, run 2 + first-boot hooks
+Re-enables the deferred bits, runs the final apply, and installs (but does not
+load) the first-boot hooks: the dynamic-hostname LaunchDaemon and the
+**`vault-inject` LaunchDaemon** that supplies real credentials on the deployed
+VM. Any build-time vault is removed so the image ships credential-free.
 
 ---
 
-## 🏷️ Dynamic Hostname System
+## 🧩 Credential Injection (how a deployed VM gets its real secret)
 
-VMs automatically configure unique, stable hostnames on first boot:
+The image contains **no** worker credential. On a deployed VM's **first boot**:
 
-```bash
-# Example: mac-eb3740 (derived from MAC address 12:5d:17:eb:37:40)
-```
+1. The Tart **host** (MDM-enrolled) fetches the per-pool vault from the RelOps
+   secret broker over mTLS, using a client certificate delivered to the host by
+   MDM. The host launches the VM with the vault shared in read-only:
+   `tart run --dir=vault:<dir>:ro …` (see `ronin_puppet` `profiles::tart`).
+2. Inside the VM, `com.mozilla.vault-inject` runs `vault-inject.sh`, which reads
+   `/Volumes/My Shared Files/vault/vault.yaml`, writes it to
+   `/var/root/vault.yaml`, and runs `run-puppet.sh`.
+3. Puppet regenerates the worker config with the real `worker.access_token` /
+   `worker.client_id`, and the worker registers with Taskcluster.
 
-**How it works:**
-1. `set_hostname.sh` runs at boot via LaunchDaemon
-2. Extracts last 3 octets of primary interface MAC address
-3. Sets hostname to `mac-{MAC}`
-4. Updates TaskCluster worker configuration files with new hostname
-5. Worker registers with TaskCluster using unique identity
-
-**Benefits:**
-- No hostname collisions between VMs
-- Stable identity across reboots
-- Automatic TaskCluster integration
-- Easy identification in logs and monitoring
+The secret exists only inside the ephemeral VM at runtime — never on the build
+runner, never in the image.
 
 ---
 
 ## 📦 Deployment
 
-### Worker Host Configuration (Puppet-Managed)
+Tart worker hosts are Puppet-managed (`roles_profiles::roles::tart_worker` /
+`profiles::tart`). Puppet installs Tart, pulls `sequoia-tester:prod-latest`
+(anonymous pull), clones VMs (Apple licensing caps at **2 VMs per host**), and
+keeps them running via LaunchDaemons. When `inject_vault` is enabled for the
+host, the launch wrapper performs the host-mediated vault fetch described above.
 
-Tart worker hosts are configured via Puppet (`roles_profiles::roles::tart_worker`):
-
-```yaml
-# data/roles/tart_worker.yaml
-tart:
-  version: '2.30.0'
-  registry_host: '10.49.56.161'
-  registry_port: 5000
-  oci_image: 'sequoia-tester:prod-latest'
-  worker_count: 2
-  insecure: true
-```
-
-**Puppet automatically:**
-- Installs Tart 2.30.0
-- Pulls `sequoia-tester:prod-latest` from OCI registry
-- Clones 2 VMs per host (Apple licensing limit)
-- Configures LaunchDaemons to keep VMs running
-- Creates manual update script at `/usr/local/bin/tart-update-vms.sh`
-
-### Manual VM Updates
-
-When you want to deploy a new image to running workers:
-
-```bash
-# On the Tart worker host
-sudo /usr/local/bin/tart-update-vms.sh
-```
-
-This script:
-1. Stops all worker VMs gracefully (30s wait)
-2. Deletes old VMs
-3. Pulls latest image from OCI registry
-4. Clones fresh VMs
-5. Restarts LaunchDaemons
-
-**Downtime:** ~2-3 minutes per worker host
+To roll a new image onto a host: pull the new `prod-latest`, recreate the VMs,
+and restart the worker daemon. Graceful fleet-wide rollout automation is
+tracked separately; for now this is done per host.
 
 ---
 
-## 🔐 Secrets Management
+## 🏷️ Dynamic Hostname System
 
-### Fake Vault (Development/PR)
+VMs self-configure a stable, unique hostname on first boot:
 
-`vault-fake.yaml` contains non-sensitive placeholder data for testing. Safe to commit to the repository.
+1. `set_hostname.sh` runs at boot via LaunchDaemon.
+2. It derives `mac-{last-3-MAC-octets}` from the primary interface.
+3. It updates the Taskcluster worker config so the worker registers under that
+   unique identity.
 
-### Real Vault (Production)
-
-Located at `/etc/ronin/vault-real.yaml` on GitHub Actions runners. Contains:
-- Puppet Hiera secrets
-- API keys
-- Certificates
-- Service credentials
-
-**Security:**
-- Never committed to repository
-- Injected during build via GitHub Actions
-- Copied to `/var/root/vault.yaml` in VM during Phase 3
-- **Deleted** in Phase 4 after Puppet consumes it
-- Not present in final OCI image
+This avoids hostname/worker-id collisions between VMs cloned from one image.
 
 ---
 
-## 🎛️ Configuration
+## 🏷️ OCI Registry Tags
 
-### OCI Registry Tags
+- `prod-latest` → most recent `main` build
+- `prod-{sha}` → a specific `main` commit
 
-- `prod-latest` → Most recent main branch build
-- `prod-{sha}` → Specific commit from main branch
-- `pr-{number}-latest` → Most recent build from PR #{number}
-- `pr-{number}-{sha}` → Specific commit from PR #{number}
+The registry is **anonymous-pull, authenticated-push**. Pulls (tester hosts)
+need no credential; pushes (the build) authenticate as `builder` using the
+`REGISTRY_PUSH_PASSWORD` GitHub Actions secret.
 
-### Environment Variables
+---
 
-```bash
-VM_NAME="sequoia-tester"           # Base VM name
-VAULT_FILE="vault-fake.yaml"       # Path to vault file
-REGISTRY_HOST="10.49.56.161"       # OCI registry host
-REGISTRY_PORT="5000"               # OCI registry port
-REGISTRY_IMAGE="sequoia-tester"    # Image name in registry
-```
+## 🖥️ Build-Host Operations (`scripts/`)
+
+The build runs on a self-hosted runner (a Mac). Because that host is
+long-lived, `scripts/` keeps it reproducible and healthy:
+
+- **`setup-build-runner.sh <registration-token>`** — one command to (re)install
+  the GitHub Actions runner and the maintenance daemon. The token is a runtime
+  argument; nothing secret is committed.
+- **`build-runner-maintenance.sh` + LaunchDaemon** — hourly `tart prune` (only
+  when no build VM is running) plus a low-disk email alert. The build host's
+  historical failure mode was silently filling its disk.
+
+See `scripts/README.md` for details.
 
 ---
 
 ## 🐛 Troubleshooting
 
-### Build fails during Puppet Phase 1
+**Phase 1 (create-base) times out waiting for SSH.** Usually the Setup
+Assistant VNC automation drifted; re-run the build. Persistent failures point
+at host load or a macOS layout change in the boot-command tab-navigation.
 
-**Check:** Vault file exists and is readable
-```bash
-ls -la /var/root/vault.yaml  # Inside VM
-```
+**A deployed VM won't register with Taskcluster.** Check the injection chain:
+on the host, confirm `inject_vault` is on and the vault fetch succeeded; in the
+VM, check `/var/log/vault-inject.{out,err}` and that `/var/root/vault.yaml`
+existed before the puppet run.
 
-### VMs won't start on worker host
-
-**Check LaunchDaemons:**
+**VMs won't start on a worker host.**
 ```bash
 sudo launchctl list | grep mozilla
 tail -f /var/log/tartworker-1.out
 ```
 
-### Wrong hostname after boot
-
-**Manually run hostname script:**
+**Can't pull from the OCI registry.**
 ```bash
-sudo /usr/local/bin/set_hostname.sh
+curl http://<registry>/v2/                       # anon pull is allowed
+tart pull --insecure <registry>/sequoia-tester:prod-latest
 ```
-
-### Can't pull from OCI registry
-
-**Verify connectivity:**
-```bash
-curl http://10.49.56.161:5000/v2/
-tart pull --insecure 10.49.56.161:5000/sequoia-tester:prod-latest
-```
+(Pull failures are usually connectivity; push failures are usually auth — pushes
+require the `builder` credential.)
 
 ---
 
-## 📊 Metrics
+## 📊 Notes on Sizing
 
-**Build Times:**
-- Phase 1 (Base): ~12-15 min
-- Phase 2 (SIP): ~2 min
-- Phase 3 (Puppet 1): ~7 min
-- Phase 4 (Puppet 2): ~2-3 min
-- **Total:** ~27 minutes
-
-**Image Sizes:**
-- Base macOS: ~14 GB
-- After Puppet: ~16 GB
-- Compressed in OCI: ~22 GB
-- Uncompressed on disk: ~100 GB
-
-**Fun Fact:** Due to copy-on-write magic in Apple File System (APFS), a cloned VM won't actually claim all 100 GB right away. Only changes to a cloned disk will be written and claim new space. This also speeds up clones enormously—creating a new worker VM takes seconds instead of minutes.
-
-**Resource Requirements:**
-- CPU: 4 cores per VM
-- Memory: 8 GB per VM
-- Disk: 100 GB per VM
-- Maximum: 2 VMs per physical host (Apple license)
+Thanks to APFS copy-on-write, a cloned VM does not immediately claim its full
+provisioned disk — only writes to the clone consume new space, which also makes
+cloning near-instant. Per-VM: 4 CPU / 8 GB RAM / 100 GB provisioned disk;
+**max 2 VMs per physical host** (Apple license).
 
 ---
 
 ## 🤝 Contributing
 
-1. Create a feature branch
-2. Test locally with `./builder.sh`
-3. Open a PR (triggers PR build with fake vault)
-4. Merge to main (triggers prod build with real vault)
-5. VMs automatically deployed via Puppet
+1. Create a feature branch and test locally with `./builder.sh` (credential-free).
+2. Open a PR for review. **PRs do not trigger a build** on the self-hosted
+   runner by design (Bug 2049579) — validate locally.
+3. Merge to `main` → triggers the credential-free prod build → image pushed to
+   the registry → deployed to Tart hosts via Puppet.
 
 ---
 
