@@ -114,18 +114,17 @@ macos-vms/
 │   ├── setup-build-runner.sh               #   reproducible runner (re)install
 │   ├── build-runner-maintenance.sh         #   hourly tart prune + low-disk alert
 │   └── com.mozilla.build-runner-maintenance.plist
-├── mac/tester15/                           # the tester VM image
-│   ├── builder.sh                          #   4-phase build orchestrator
-│   ├── create-base.pkr.hcl                 #   Phase 1: base macOS from IPSW
-│   ├── disable-sip.pkr.hcl                 #   Phase 2: disable SIP (guest)
-│   ├── puppet-setup-phase1.pkr.hcl         #   Phase 3: puppet run 1
-│   ├── puppet-setup-phase2.pkr.hcl         #   Phase 4: puppet run 2 + first-boot hooks
-│   ├── set_hostname.sh                     #   dynamic hostname (LaunchDaemon)
-│   ├── com.mozilla.sethostname.plist
-│   ├── vault-inject.sh                     #   FIRST-BOOT: read host-shared vault → puppet
-│   ├── com.mozilla.vault-inject.plist
-│   └── vault-fake.yaml                     #   non-secret build-time vault (safe to commit)
-└── mac/builder-arm64/                      # (separate) arm64 builder-image variant
+└── mac/tester15/                           # the tester VM image
+    ├── builder.sh                          #   4-phase build orchestrator
+    ├── create-base.pkr.hcl                 #   Phase 1: base macOS from IPSW
+    ├── disable-sip.pkr.hcl                 #   Phase 2: disable SIP (guest)
+    ├── puppet-setup-phase1.pkr.hcl         #   Phase 3: puppet run 1
+    ├── puppet-setup-phase2.pkr.hcl         #   Phase 4: puppet run 2 + first-boot hooks
+    ├── set_hostname.sh                     #   dynamic hostname (LaunchDaemon)
+    ├── com.mozilla.sethostname.plist
+    ├── vault-inject.sh                     #   FIRST-BOOT: read host-shared vault → puppet
+    ├── com.mozilla.vault-inject.plist
+    └── vault-fake.yaml                     #   non-secret build-time vault (safe to commit)
 ```
 
 ---
