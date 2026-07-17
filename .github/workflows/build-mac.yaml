@@ -109,6 +109,22 @@ jobs:
           curl -fsSL http://${{ env.REGISTRY_HOST }}:${{ env.REGISTRY_PORT }}/v2/ || \
             echo "⚠️ Registry reachable but returned non-200"
 
+      # The registry now enforces authenticated push (anon pull / auth push,
+      # Bug 2049579 rec #4). Log in with the builder credential from a repo
+      # secret before pushing. Pulls (tester hosts) stay anonymous.
+      - name: Log in to the OCI registry (push)
+        if: ${{ success() }}
+        env:
+          REGISTRY: ${{ env.REGISTRY_HOST }}:${{ env.REGISTRY_PORT }}
+          REGISTRY_PUSH_PASSWORD: ${{ secrets.REGISTRY_PUSH_PASSWORD }}
+        run: |
+          if [ -z "${REGISTRY_PUSH_PASSWORD}" ]; then
+            echo "❌ REGISTRY_PUSH_PASSWORD secret not set — cannot push to the auth'd registry"
+            exit 1
+          fi
+          printf '%s' "${REGISTRY_PUSH_PASSWORD}" | tart login "${REGISTRY}" --username builder --password-stdin --insecure
+          echo "✅ logged in to ${REGISTRY} as builder"
+
       - name: Push built VM to local OCI registry
         if: ${{ success() }}
         env:
