@@ -56,10 +56,17 @@ build {
       "echo 'Enabling passwordless sudo for admin...'",
       "echo admin | sudo -S sh -c 'mkdir -p /etc/sudoers.d/ && echo \"admin ALL=(ALL) NOPASSWD: ALL\" | tee /etc/sudoers.d/admin-nopasswd'",
 
-      "echo 'Installing Command Line Tools...'",
-      "touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress",
-      "softwareupdate --list | sed -n 's/.*Label: \\(Command Line Tools for Xcode-.*\\)/\\1/p' | xargs -I {} softwareupdate --install '{}'",
-      "rm /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress",
+      # Install a PINNED Command Line Tools (Xcode 16.4, matching the M4 fleet)
+      # straight from S3 instead of the slow, non-deterministic `softwareupdate`
+      # catalog dance. Installs to /Library/Developer/CommandLineTools, so the
+      # puppet macos_xcode_tools softwareupdate exec then no-ops (its guard is
+      # `unless test -d /Library/Developer/CommandLineTools/Library`).
+      "echo 'Installing pinned Command Line Tools (Xcode 16.4) from S3...'",
+      "curl -o /tmp/clt.dmg https://ronin-puppet-package-repo.s3.us-west-2.amazonaws.com/macos/public/common/Command_Line_Tools_for_Xcode_16.4.dmg",
+      "hdiutil attach /tmp/clt.dmg -nobrowse -mountpoint /tmp/clt",
+      "echo admin | sudo -S installer -pkg '/tmp/clt/Command Line Tools.pkg' -target /",
+      "hdiutil detach /tmp/clt",
+      "rm -f /tmp/clt.dmg",
 
       "echo 'Downloading Puppet from S3...'",
       "curl -o /tmp/puppet-agent-7.28.0-1-installer.pkg https://ronin-puppet-package-repo.s3.us-west-2.amazonaws.com/macos/public/common/puppet-agent-7.28.0-1-installer.pkg",
