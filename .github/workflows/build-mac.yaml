@@ -32,6 +32,23 @@ jobs:
       - name: Kill any stuck tart build processes
         run: pkill -9 -f "tart run sequoia-" 2>/dev/null || true
 
+      # Reclaim disk before building. The runner's Data volume has filled up
+      # historically (tart's OCI pull cache + leftover build VMs), causing builds
+      # to die mid-run. Prune the cache + any stale build VM, then fail fast if
+      # still critically low rather than producing a corrupt image.
+      - name: Reclaim disk + guard free space
+        run: |
+          echo "Disk before:"; df -h /System/Volumes/Data | tail -1
+          /opt/homebrew/bin/tart delete sequoia-tester 2>/dev/null || true
+          /opt/homebrew/bin/tart prune 2>/dev/null || true
+          echo "Disk after:";  df -h /System/Volumes/Data | tail -1
+          avail=$(df -g /System/Volumes/Data | awk 'NR==2{print $4}')
+          echo "Free: ${avail:-?} GiB"
+          if [ "${avail:-0}" -lt 30 ]; then
+            echo "::error::Only ${avail} GiB free on the runner (<30 GiB) after prune — investigate m4-116 disk before building."
+            exit 1
+          fi
+
       - name: Checkout repo
         uses: actions/checkout@v4
 
