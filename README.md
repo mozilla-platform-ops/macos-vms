@@ -57,44 +57,44 @@ you are touching the security boundary — get it reviewed as such.
 ## 🏗️ Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                  GitHub Actions (self-hosted)                 │
-│   push to main / workflow_dispatch                            │
-│   ┌───────────────────────┐    ┌──────────────────────────┐  │
-│   │  Build (fake vault,    │──▶ │  Push to OCI registry     │  │
-│   │  credential-free)      │    │  (auth: builder secret)   │  │
-│   └───────────────────────┘    └──────────────────────────┘  │
-└──────────────────────────────────────────────────────────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │   OCI Registry      │   anon pull / auth push
-                    │                     │
-                    │  sequoia-tester:    │
-                    │  - prod-latest      │
-                    │  - prod-{sha}       │
-                    └─────────────────────┘
-                               │  (host pulls)
-                               ▼
-        ┌────────────────────────────────────────────┐
-        │        Tart Worker Host (MDM-enrolled)      │
-        │                                             │
-        │  1. holds a broker client cert (via MDM)    │
-        │  2. fetches the per-pool vault over mTLS    │
-        │  3. shares it into each VM at launch:        │
-        │       tart run --dir=vault:<dir>:ro         │
-        │                                             │
-        │   ┌───────────────┐   ┌───────────────┐     │
-        │   │ credential-    │   │ credential-    │    │
-        │   │ free VM #1     │   │ free VM #2     │    │
-        │   └───────────────┘   └───────────────┘     │
-        └────────────────────────────────────────────┘
-                               │  (VM first boot reads the shared vault,
-                               │   runs puppet, registers)
-                               ▼
-                    ┌─────────────────────┐
-                    │     Taskcluster     │
-                    └─────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│           GitHub Actions runner (self-hosted)           │
+│  push to main / workflow_dispatch                       │
+│                                                         │
+│  ┌──────────────────┐       ┌────────────────────────┐  │
+│  │ Build            │       │ Push to OCI registry   │  │
+│  │ (fake vault,     │   →   │ (auth: builder secret) │  │
+│  │ credential-free) │       │                        │  │
+│  └──────────────────┘       └────────────────────────┘  │
+└─────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│  OCI Registry        (anon pull / auth push)            │
+│                                                         │
+│  sequoia-tester:  prod-latest , prod-{sha}              │
+└─────────────────────────────────────────────────────────┘
+                            │  (host pulls image)
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│             Tart Worker Host (MDM-enrolled)             │
+│                                                         │
+│  1. holds a broker client cert (via MDM)                │
+│  2. fetches the per-pool vault over mTLS                │
+│  3. shares it into each VM at launch:                   │
+│       tart run --dir=vault:<dir>:ro                     │
+│                                                         │
+│  ┌─────────────────┐   ┌─────────────────┐              │
+│  │ credential-free │   │ credential-free │              │
+│  │ VM #1           │   │ VM #2           │              │
+│  └─────────────────┘   └─────────────────┘              │
+└─────────────────────────────────────────────────────────┘
+                            │  (VM first boot: reads the shared vault,
+                            │  runs puppet, worker registers)
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                       Taskcluster                       │
+└─────────────────────────────────────────────────────────┘
 ```
 
 The **image is credential-free**; the **host** is the trust anchor (its MDM
