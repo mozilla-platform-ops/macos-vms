@@ -47,14 +47,19 @@ jobs:
           echo "Event: ${GITHUB_EVENT_NAME}"
           echo "Ref: ${GITHUB_REF_NAME}"
 
+          # Always build CREDENTIAL-FREE with the fake vault. Real Taskcluster
+          # creds are never baked into the image; the tart host injects the real
+          # vault at VM launch (ronin_puppet tart.inject_vault + tester15
+          # vault-inject.sh). The runner therefore never holds a worker secret
+          # (Bug 2049579 remediation).
+          echo "VAULT_FILE=${{ github.workspace }}/mac/tester15/vault-fake.yaml" >> $GITHUB_ENV
+
           if [[ ( "${GITHUB_EVENT_NAME}" == "push" || "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ) && "${GITHUB_REF_NAME}" == "main" ]]; then
-            echo "Using real vault for main build"
+            echo "main build -> prod tags (credential-free)"
             echo "ALIAS_TAG=prod-latest" >> $GITHUB_ENV
             echo "BUILD_TAG=prod-${GITHUB_SHA}" >> $GITHUB_ENV
-            # We'll set VAULT_FILE after we stage it into the workspace (next step)
           else
-            echo "Using fake vault for PR build"
-            echo "VAULT_FILE=${{ github.workspace }}/mac/tester15/vault-fake.yaml" >> $GITHUB_ENV
+            echo "non-main build -> pr tags (credential-free)"
             echo "ALIAS_TAG=pr-${{ github.event.pull_request.number }}-latest" >> $GITHUB_ENV
             echo "BUILD_TAG=pr-${{ github.event.pull_request.number }}-${GITHUB_SHA}" >> $GITHUB_ENV
           fi
@@ -64,14 +69,8 @@ jobs:
           cat $GITHUB_ENV | grep -E 'VAULT_FILE|BUILD_TAG|ALIAS_TAG' || true
           echo ""
 
-      # Stage the real vault into the workspace (on push→main or workflow_dispatch→main)
-      - name: Stage real vault into workspace
-        if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref_name == 'main' }}
-        run: |
-          # Copy from the runner's secure location into the workspace
-          install -m 600 /etc/ronin/vault-real.yaml "${GITHUB_WORKSPACE}/mac/tester15/vault-real.yaml"
-          # Point VAULT_FILE at the staged workspace file (where Packer will read it)
-          echo "VAULT_FILE=${GITHUB_WORKSPACE}/mac/tester15/vault-real.yaml" >> $GITHUB_ENV
+      # (Removed: staging /etc/ronin/vault-real.yaml. The image is credential-free
+      # and the runner holds no worker secret — creds are injected at VM boot.)
 
       # Optional: masked hash to confirm we’re reading a file without leaking content
       - name: Log vault hash (masked)
