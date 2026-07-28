@@ -10,5 +10,13 @@
     </array>
     <key>RunAtLoad</key>
     <true/>
+    <!-- Without these, everything set_hostname.sh says is lost. The script
+         failing part-way through (leaving a clone on the image's baked workerId)
+         was invisible for exactly this reason; the script now also keeps its own
+         /var/log/set_hostname.log. -->
+    <key>StandardOutPath</key>
+    <string>/var/log/set_hostname.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/set_hostname.launchd.log</string>
 </dict>
 </plist>
