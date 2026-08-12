@@ -51,9 +51,9 @@ scheme here would hit the default case every time. Consequently:
 
 | | tester15 | signer14 | why |
 |---|---|---|---|
-| macOS | Sequoia 15 | **Sonoma 14.7.5 (23H527)** | matches the fleet; `Mac14,3` / M2 mini |
+| macOS | Sequoia 15 | **Sonoma 14.7.x** (fleet: 14.7.5 / 23H527) | matches the fleet; `Mac14,3` / M2 mini |
 | SIP | disabled (phase 2) | **left enabled** | prod signers run SIP-on; the role converges under it there |
-| Phases | 4 | **3** | no SIP-disable phase |
+| Phases | 4 | **3 + an OS-update step** | no SIP-disable phase; see "Getting to 14.7.x" |
 | Hostname | MAC-derived, self-assigned | **host-allocated, fail-closed** | hostname is the flavor selector |
 | puppet branch | `master` | **`macos-signer-latest`** | what `puppet::periodic` pins for signers |
 | `profiles::hardware` | not in role | **excluded from role** | `assert_firmware` fail()s on `VirtualMac2,1` |
@@ -86,18 +86,41 @@ Keep that role in sync with `mac_v4_signing_dep.pp` when it changes.
 
 ```bash
 cd mac/signer14
-IPSW_URL="https://updates.cdn-apple.com/.../UniversalMac_14.7.5_23H527_Restore.ipsw" ./builder.sh
+IPSW_URL="https://updates.cdn-apple.com/2024SummerFCS/fullrestores/062-52859/932E0A8F-6644-4759-82DA-F8FA8DEA806A/UniversalMac_14.6.1_23G93_Restore.ipsw" ./builder.sh
 ```
 
 `IPSW_URL` has no default on purpose — matching the prod build is the point, so
-it is an explicit decision rather than something a file guesses at. Get the URL
-from Apple's mesu catalog or ipsw.me.
+it is an explicit decision rather than something a file guesses at.
 
 Iterating on the puppet phases against an already-built base:
 
 ```bash
-SKIP_BASE=1 ./builder.sh
+SKIP_BASE=1 SKIP_OS_UPDATE=1 ./builder.sh
 ```
+
+### Getting to 14.7.x
+
+**You cannot restore straight to the fleet's version.** The signers run macOS
+14.7.5 (23H527), but Apple never published a full restore IPSW for it. Sonoma
+IPSWs stop at **14.6.1 (23G93, Aug 2024)** — once Sequoia shipped, the 14.7.x
+releases were security updates delivered through `softwareupdate`, not full
+restores. (Absent from both ipsw.me's `Mac14,3` index and Mr. Macintosh's IPSW
+database; Apple's own mesu catalog only carries the current release.)
+
+So the version story is two steps, and `update-os.pkr.hcl` is the second:
+
+1. **Phase 1** restores 14.6.1 from the IPSW.
+2. **Phase 1.5** runs `softwareupdate`, refusing anything that would leave
+   macOS 14, and asserts the result is still a 14.x.
+
+One caveat worth knowing before you compare against the fleet: `softwareupdate`
+generally only offers the *current* security update for a major, so this lands
+on whatever the newest 14.7.x is, which may be **newer than 14.7.5**. Pin with
+`TARGET_LABEL="macOS Sonoma 14.7.5-23H527"` if that exact one is still offered.
+If the image and the fleet end up disagreeing, that is a fleet-patching
+question rather than an image bug.
+
+`SKIP_OS_UPDATE=1` stays on the IPSW's version.
 
 ### Phase 1 is the flaky one
 

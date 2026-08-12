@@ -31,6 +31,12 @@ PUPPET_ROLE="${PUPPET_ROLE:-mac_v4_signing_dep_vms}"
 # image you already built — create-base is slow and the flakiest step.
 SKIP_BASE="${SKIP_BASE:-0}"
 
+# Phase 1.5. Apple never shipped a 14.7.5 IPSW — Sonoma restore images stop at
+# 14.6.1 — so reaching the fleet's point release means updating the guest after
+# the restore. Set SKIP_OS_UPDATE=1 to stay on the IPSW's version.
+SKIP_OS_UPDATE="${SKIP_OS_UPDATE:-0}"
+TARGET_LABEL="${TARGET_LABEL:-}"
+
 if [[ ! -f "$VAULT_FILE" ]]; then
   echo "❌ Vault file not found at '$VAULT_FILE'"
   echo "pwd: $(pwd)"
@@ -41,12 +47,16 @@ if [[ "$SKIP_BASE" != "1" && -z "$IPSW_URL" ]]; then
   cat <<'EOF'
 ❌ IPSW_URL is not set.
 
-There is deliberately no default. The bare-metal signers run macOS 14.7.5
-(build 23H527) and this image exists to match them, so the restore image is an
-explicit decision. Get the URL for the exact build from Apple's mesu catalog or
-ipsw.me, then:
+There is deliberately no default — the restore image is an explicit decision.
 
-  IPSW_URL="https://updates.cdn-apple.com/.../UniversalMac_14.7.5_23H527_Restore.ipsw" ./builder.sh
+Note that you CANNOT restore straight to the fleet's version. The signers run
+macOS 14.7.5 (23H527), but Apple never published a full restore IPSW for it:
+Sonoma IPSWs stop at 14.6.1 (23G93, Aug 2024), because once Sequoia shipped the
+14.7.x releases were security updates delivered through `softwareupdate`.
+
+So restore 14.6.1 and let phase 1.5 update the guest within the major:
+
+  IPSW_URL="https://updates.cdn-apple.com/2024SummerFCS/fullrestores/062-52859/932E0A8F-6644-4759-82DA-F8FA8DEA806A/UniversalMac_14.6.1_23G93_Restore.ipsw" ./builder.sh
 
 To skip phase 1 and reuse a base image you have already built:
 
@@ -79,6 +89,16 @@ else
     -var="vm_name=$VM_NAME" \
     -var="ipsw_url=$IPSW_URL" \
     create-base.pkr.hcl
+fi
+
+# Phase 1.5: update within macOS 14 to reach the fleet's point release
+if [[ "$SKIP_OS_UPDATE" == "1" ]]; then
+  echo "⏭  Phase 1.5 (update-os) skipped — image stays on the IPSW's version."
+else
+  packer build -force \
+    -var="vm_name=$VM_NAME" \
+    -var="target_label=$TARGET_LABEL" \
+    update-os.pkr.hcl
 fi
 
 # Phase 2: puppet run 1 (sets the build hostname first — see the file)
