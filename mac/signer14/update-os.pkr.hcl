@@ -19,11 +19,25 @@ packer {
 # So "match the prod OS" is two steps: restore 14.6.1, then update within the
 # major. This phase is the second step.
 #
-# CAVEAT: `softwareupdate` generally only offers the CURRENT security update for
-# a major, so this lands on whatever the latest 14.7.x is — which may be newer
-# than the fleet's 14.7.5. Pin with -var target_label=... if you need a specific
-# one and it is still offered. If the fleet and the image disagree, that is a
-# fleet-patching question, not an image bug.
+# CAVEAT — and it is bigger than it first looks. `softwareupdate` only offers the
+# CURRENT security update for a major, and as of 2026-08-12 a fresh 14.6.1 guest
+# is offered:
+#
+#     * Label: macOS Sonoma 14.8.9-23J631      <-- what this phase installs
+#     * Label: macOS Tahoe 26.6.1-25G76        <-- correctly refused (major bump)
+#     * Label: Safari26.6SonomaAuto-26.6
+#
+# So Sonoma did not stop at 14.7.x; there is a 14.8 line, and the newest is
+# 14.8.9. This phase therefore lands the image on 14.8.9 while the signer fleet
+# sits on 14.7.5 — the image ends up AHEAD of the hardware by a minor release,
+# not level with it. 14.7.5 is not offered and cannot be reached this way.
+#
+# Both are Darwin 23, so mac_signing.pp's version case handles either
+# identically. Whether the divergence is acceptable is a fleet-patching
+# decision, not something this file can settle. Options:
+#   - accept 14.8.9 here (and consider patching the fleet toward it);
+#   - SKIP_OS_UPDATE=1 to stay on 14.6.1, i.e. behind the fleet rather than ahead;
+#   - -var target_label=... if a specific build is ever offered again.
 
 variable "vm_name" {
   type    = string
@@ -59,6 +73,13 @@ build {
       "set -eu",
       "echo 'Before:'; sw_vers",
 
+      # This phase runs BEFORE puppet-setup-phase1, so /etc/sudoers.d/admin-nopasswd
+      # does not exist yet and a bare `sudo` has no tty to prompt on. Bootstrap it
+      # here the same way phase 1 does. It cannot simply be `sudo -S` throughout:
+      # `softwareupdate --stdinpass` also wants the password on stdin, and the two
+      # would fight over it. Phase 3 removes this file before the image is sealed.
+      "echo admin | sudo -S sh -c 'mkdir -p /etc/sudoers.d && echo \"admin ALL=(ALL) NOPASSWD: ALL\" > /etc/sudoers.d/admin-nopasswd'",
+
       # Only ever consider updates that keep us on macOS 14. `softwareupdate -i -a`
       # can pull in a major upgrade, which would silently defeat the entire point
       # of this phase. The ansible system-updater role in this repo guards the
@@ -75,12 +96,10 @@ build {
 
       "if [ -z \"$TARGET\" ]; then",
       "  echo 'No macOS 14.x update offered — already current, or Apple stopped offering one.'",
-      "  echo 'NOUPDATE' | sudo tee /var/db/.signer_os_update_state >/dev/null",
       "  exit 0",
       "fi",
 
       "echo \"Installing: $TARGET\"",
-      "echo \"$TARGET\" | sudo tee /var/db/.signer_os_update_state >/dev/null",
       # --restart is required; without it softwareupdate hangs at
       # "Downloaded: macOS [...]" (see the ansible role's comment on the same bug).
       "sudo softwareupdate --install --agree-to-license --force --restart --user admin --stdinpass <<<'admin' \"$TARGET\" || true",
@@ -100,7 +119,6 @@ build {
       "test \"$MAJOR\" = '14' || { echo \"FATAL: left macOS 14 (now $VER) — this image must stay on Sonoma\"; exit 1; }",
       "echo \"Base image is now macOS $VER (fleet reference: 14.7.5 / 23H527)\"",
       "test \"$VER\" = '14.7.5' && echo 'Exact match with the fleet.' || echo 'NOTE: differs from the fleet 14.7.5 — see the caveat in update-os.pkr.hcl.'",
-      "sudo rm -f /var/db/.signer_os_update_state",
     ]
   }
 }

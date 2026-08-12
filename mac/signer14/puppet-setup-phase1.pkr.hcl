@@ -104,11 +104,34 @@ build {
       # TODO: confirm this is the same certificate the MDM profile installs
       # before trusting the image to sign. Dump the payload from a real signer
       # with `sudo profiles -P -o stdout` and compare the SHA-256.
-      "echo 'Installing Apple Developer ID CA into the System keychain...'",
+      # Stock macOS already trusts the ORIGINAL Developer ID Certification
+      # Authority (sha256 7afc9d01...) via SystemRootCertificates.keychain. The
+      # G2 CA below (sha256 f16cd3c5...) is a DIFFERENT certificate and is not
+      # in the default roots — which is the likeliest reason the signers carry
+      # an MDM trusted-certificate payload at all.
+      #
+      # TODO: confirm against the real payload. Dump it from a signer with
+      # `sudo profiles -P -o stdout` and compare; if the profile ships something
+      # other than G2, change the URL here.
+      "echo 'Installing Apple Developer ID G2 CA into the System keychain...'",
       "curl -fsSL -o /tmp/DeveloperIDG2CA.cer https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer",
       "test -s /tmp/DeveloperIDG2CA.cer || { echo 'FATAL: Developer ID CA download was empty'; exit 1; }",
-      "echo \"Developer ID CA sha256: $(shasum -a 256 /tmp/DeveloperIDG2CA.cer | awk '{print $1}')\"",
-      "sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/DeveloperIDG2CA.cer",
+      "echo \"Developer ID G2 CA sha256: $(shasum -a 256 /tmp/DeveloperIDG2CA.cer | awk '{print $1}')\"",
+
+      # `security add-trusted-cert` calls SecTrustSettingsSetTrustSettings, which
+      # demands an authorization that cannot be granted over SSH:
+      #   "The authorization was denied since no user interaction was possible."
+      # Granting com.apple.trust-settings.admin for the duration is the standard
+      # headless workaround. Scoped tightly and reverted immediately after, so
+      # the image does not ship with trust settings writable without auth.
+      "sudo security authorizationdb write com.apple.trust-settings.admin allow",
+      "sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/DeveloperIDG2CA.cer; rc=$?",
+      "sudo security authorizationdb remove com.apple.trust-settings.admin || true",
+      "test \"$rc\" -eq 0 || { echo 'FATAL: could not add the Developer ID G2 CA to the System keychain'; exit 1; }",
+
+      # Prove it landed rather than assuming the exit code told the truth.
+      "sudo security find-certificate -c 'Developer ID Certification Authority' /Library/Keychains/System.keychain >/dev/null 2>&1 || { echo 'FATAL: Developer ID G2 CA not present in System.keychain after add'; exit 1; }",
+      "echo 'Developer ID G2 CA present and trusted in System.keychain.'",
       "rm -f /tmp/DeveloperIDG2CA.cer",
 
       # -----------------------------------------------------------------------

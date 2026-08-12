@@ -113,23 +113,41 @@ So the version story is two steps, and `update-os.pkr.hcl` is the second:
 2. **Phase 1.5** runs `softwareupdate`, refusing anything that would leave
    macOS 14, and asserts the result is still a 14.x.
 
-One caveat worth knowing before you compare against the fleet: `softwareupdate`
-generally only offers the *current* security update for a major, so this lands
-on whatever the newest 14.7.x is, which may be **newer than 14.7.5**. Pin with
-`TARGET_LABEL="macOS Sonoma 14.7.5-23H527"` if that exact one is still offered.
-If the image and the fleet end up disagreeing, that is a fleet-patching
-question rather than an image bug.
+**The fleet's exact version is not reachable, and the gap is wider than
+expected.** `softwareupdate` only offers the *current* security update for a
+major. Measured on a fresh 14.6.1 guest, 2026-08-12:
 
-`SKIP_OS_UPDATE=1` stays on the IPSW's version.
+```
+* Label: macOS Sonoma 14.8.9-23J631     <-- what phase 1.5 installs
+* Label: macOS Tahoe 26.6.1-25G76       <-- correctly refused (major bump)
+* Label: Safari26.6SonomaAuto-26.6
+```
+
+So Sonoma did not stop at 14.7.x — there is a 14.8 line, and the newest is
+**14.8.9**. Phase 1.5 therefore lands the image **ahead of the fleet** (14.8.9
+vs 14.7.5), not level with it. 14.7.5 is not offered and cannot be reached this
+way.
+
+Both are Darwin 23, so `mac_signing.pp`'s version case treats them identically
+and the puppet run does not care. Whether the divergence matters for
+codesign/notarytool reproducibility is a fleet-patching decision:
+
+- accept **14.8.9** in the image, and consider patching the fleet toward it;
+- `SKIP_OS_UPDATE=1` to stay on **14.6.1** — behind the fleet rather than ahead;
+- `TARGET_LABEL=...` if a specific build is ever offered again.
 
 ### Phase 1 is the flaky one
 
 `create-base.pkr.hcl` drives Setup Assistant with blind, timed VNC keystrokes.
-**The sequence currently in that file was written for Sequoia and copied here
-verbatim as a starting point — it is not yet validated on Sonoma.** Pane order
-and the tab stops in Sharing differ between releases. Watch the first run over
-VNC and fix the counts. Drift shows up as "timeout waiting for SSH", not as an
-obvious UI error.
+The sequence is carried over unchanged from tester15, where it was written for
+Sequoia; it was expected to need retuning for Sonoma but does not —
+**verified working against 14.6.1 (23G93) on 2026-08-12, reaching SSH in
+15m26s with no edits.**
+
+That is not a guarantee for the future. A macOS point release can move a pane or
+a tab stop under it at any time, and drift surfaces as "timeout waiting for SSH"
+rather than an obvious UI error. Re-run once before digging; if it fails twice,
+watch over VNC and fix the tab counts.
 
 ---
 

@@ -38,15 +38,16 @@ source "tart-cli" "create-base" {
   ssh_timeout  = "300s"
 
   # ---------------------------------------------------------------------------
-  # WARNING: this sequence was written and validated against SEQUOIA (macOS 15),
-  # copied here verbatim from mac/tester15/create-base.pkr.hcl as a starting
-  # point. It is blind, timed VNC keystroke automation against Setup Assistant,
-  # and Sonoma's panes are NOT identical — at minimum the pane order and the tab
-  # stops in Sharing differ between releases.
+  # Carried over unchanged from mac/tester15/create-base.pkr.hcl, where it was
+  # written for Sequoia. It was expected to need retuning for Sonoma's Setup
+  # Assistant, but it does not: verified working against 14.6.1 (23G93) on
+  # 2026-08-12, reaching SSH in 15m26s with no edits.
   #
-  # DO NOT assume this works. Watch the first run over VNC and fix the tab counts
-  # before trusting it. A drifted sequence usually surfaces as "timeout waiting
-  # for SSH", not as an obvious UI error. See README "Phase 1 is the flaky one".
+  # Still, this is blind, timed VNC keystroke automation. It is the most
+  # flake-prone step in the pipeline and a macOS point release can move a pane
+  # or a tab stop under it at any time. Drift surfaces as "timeout waiting for
+  # SSH", not as an obvious UI error — so re-run once before digging, and watch
+  # over VNC if it fails twice. See README "Phase 1 is the flaky one".
   # ---------------------------------------------------------------------------
   boot_command = [
     # hello, hola, bonjour, etc.
