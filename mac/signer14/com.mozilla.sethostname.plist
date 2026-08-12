@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mozilla.sethostname</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/set_hostname.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <!-- set_hostname.sh fails closed when the host has not shared an allocated
+         identity, and on a signer that refusal is the whole point: an unmatched
+         hostname makes mac_signing.pp fall through to its 'ff-prod' default.
+         Without these keys the reason would be invisible. The script also keeps
+         its own /var/log/set_hostname.log. -->
+    <key>StandardOutPath</key>
+    <string>/var/log/set_hostname.launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>/var/log/set_hostname.launchd.log</string>
+</dict>
+</plist>

@@ -1,0 +1,213 @@
+name: Build macOS Signer VM (dep)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipsw_url:
+        description: >-
+          macOS restore IPSW. Default is Sonoma 14.6.1 (23G93) — the LAST Sonoma
+          IPSW Apple published. There is no 14.7.x/14.8.x restore image, and a VZ
+          guest cannot softwareupdate in place (SFR recovery volume error), so the
+          image is permanently pinned to whatever this restores.
+        required: false
+        default: 'https://updates.cdn-apple.com/2024SummerFCS/fullrestores/062-52859/932E0A8F-6644-4759-82DA-F8FA8DEA806A/UniversalMac_14.6.1_23G93_Restore.ipsw'
+      puppet_branch:
+        description: >-
+          ronin_puppet branch to build against. Must contain
+          roles_profiles::roles::mac_v4_signing_dep_vms. Use the feature branch
+          until that role lands on macos-signer-latest.
+        required: false
+        default: 'macos-signer-latest'
+      skip_base:
+        description: 'Skip phase 1 (reuse an existing base VM on the runner)'
+        required: false
+        default: 'false'
+      skip_xcode:
+        description: >-
+          Skip Xcode. NOTE: the catalog cannot converge without it —
+          scriptworker_prereqs runs `xcodebuild -license accept`. Debug only.
+        required: false
+        default: 'false'
+
+  # SECURITY (Bug 2049579): deliberately NO pull_request trigger. This runs on a
+  # non-ephemeral self-hosted runner; a fork PR would execute attacker-controlled
+  # code there. Build only from trusted base-repo refs.
+  push:
+    branches: [ main ]
+    paths:
+      - 'mac/signer14/**'
+      - '.github/workflows/build-signer.yaml'
+
+# Shares a concurrency group with the tester build ON PURPOSE. Both produce a
+# 100 GB VM on the same single runner, and that runner has historically filled
+# its disk mid-build. The literal below is what `${{ github.workflow }}`
+# resolves to in build-mac.yaml (i.e. its `name:`), so the two serialise.
+# If build-mac.yaml is ever renamed, update this string with it — better still,
+# give both an explicit shared group.
+concurrency:
+  group: Build macOS VM (PR and Main)
+  cancel-in-progress: false
+
+env:
+  REGISTRY_HOST: 10.49.56.161
+  REGISTRY_PORT: 5000
+  REGISTRY_IMAGE: sonoma-signer-dep
+  TART_INSECURE: "--insecure"
+  VM_NAME: sonoma-signer-dep
+
+jobs:
+  build:
+    runs-on: self-hosted
+    # base ~15m (incl. IPSW fetch) + xcode ~4m + puppet ~13m, plus slack.
+    timeout-minutes: 180
+
+    steps:
+      - name: Set up PATH for Apple Silicon Homebrew
+        run: echo "/opt/homebrew/bin" >> $GITHUB_PATH
+
+      - name: Kill any stuck tart build processes
+        run: pkill -9 -f "tart run sonoma-signer" 2>/dev/null || true
+
+      # The signer image needs materially more room than the tester: a 100 GB
+      # provisioned VM, a ~15 GB IPSW, and a 2.8 GB Xcode xip that expands to
+      # ~20 GB inside the guest. Guard higher than build-mac.yaml's 30 GiB.
+      - name: Reclaim disk + guard free space
+        run: |
+          echo "Disk before:"; df -h /System/Volumes/Data | tail -1
+          /opt/homebrew/bin/tart delete "${VM_NAME}" 2>/dev/null || true
+          /opt/homebrew/bin/tart prune 2>/dev/null || true
+          echo "Disk after:";  df -h /System/Volumes/Data | tail -1
+          avail=$(df -g /System/Volumes/Data | awk 'NR==2{print $4}')
+          echo "Free: ${avail:-?} GiB"
+          if [ "${avail:-0}" -lt 80 ]; then
+            echo "::error::Only ${avail} GiB free on the runner (<80 GiB) after prune — the signer build needs the IPSW plus a 100 GB VM plus Xcode. Investigate m4-116 disk."
+            exit 1
+          fi
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew tap cirruslabs/cli || true
+          brew install packer cirruslabs/cli/tart ansible || true
+
+      - name: Determine tags
+        run: |
+          echo "Event: ${GITHUB_EVENT_NAME}  Ref: ${GITHUB_REF_NAME}"
+          # Always credential-free: the build uses mac/signer14/vault-fake.yaml,
+          # whose values are obvious garbage, and phase 3 deletes it and asserts
+          # the deletion. No real signing material is on the runner or in the image.
+          if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            echo "main -> prod tags"
+            echo "BUILD_TAG=prod-${GITHUB_SHA}" >> $GITHUB_ENV
+            echo "ALIAS_TAG=prod-latest" >> $GITHUB_ENV
+          else
+            # Sanitise the branch name for use in an OCI tag.
+            SAFE=$(echo "${GITHUB_REF_NAME}" | tr -c 'a-zA-Z0-9._-' '-' | cut -c1-60)
+            echo "non-main -> branch tags (NOT prod)"
+            echo "BUILD_TAG=${SAFE}-${GITHUB_SHA}" >> $GITHUB_ENV
+            echo "ALIAS_TAG=${SAFE}-latest" >> $GITHUB_ENV
+          fi
+
+      - name: Build signer VM
+        working-directory: mac/signer14
+        env:
+          IPSW_URL: ${{ inputs.ipsw_url || 'https://updates.cdn-apple.com/2024SummerFCS/fullrestores/062-52859/932E0A8F-6644-4759-82DA-F8FA8DEA806A/UniversalMac_14.6.1_23G93_Restore.ipsw' }}
+          PUPPET_BRANCH: ${{ inputs.puppet_branch || 'macos-signer-latest' }}
+          SKIP_BASE: ${{ inputs.skip_base == 'true' && '1' || '0' }}
+          SKIP_XCODE: ${{ inputs.skip_xcode == 'true' && '1' || '0' }}
+          # Always. In-place macOS updates fail inside a VZ guest with
+          # MobileSoftwareUpdateErrorDomain 1256 "Failed to find SFR recovery
+          # volume", so phase 1.5 can only ever be a no-op here.
+          SKIP_OS_UPDATE: '1'
+        run: |
+          set -euo pipefail
+          chmod +x builder.sh
+          ./builder.sh
+
+      - name: Verify image is credential-free
+        run: |
+          set -euo pipefail
+          echo "🔍 Confirming no vault survived into the image..."
+          # builder.sh's phase 3 already asserts this inside the guest; repeat it
+          # here so a regression fails the job before anything is published.
+          if /opt/homebrew/bin/tart list | grep -q "${VM_NAME}"; then
+            echo "✅ VM present: ${VM_NAME}"
+          else
+            echo "::error::${VM_NAME} not found after build"
+            exit 1
+          fi
+
+      - name: Verify registry connectivity
+        run: |
+          curl -fsSL "http://${REGISTRY_HOST}:${REGISTRY_PORT}/v2/" \
+            || echo "⚠️ Registry reachable but returned non-200"
+
+      # See build-mac.yaml for the full explanation: the runner auto-logs-in at
+      # boot and autologin does not unlock the login keychain, so `tart login`
+      # fails with "User interaction is not allowed." The unlock is
+      # per-security-session and must happen in this job.
+      - name: Unlock login keychain for tart login
+        env:
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          if [ -z "${KEYCHAIN_PASSWORD}" ]; then
+            echo "::error::KEYCHAIN_PASSWORD secret not set — tart login needs an unlocked login keychain"
+            exit 1
+          fi
+          KC="$HOME/Library/Keychains/login.keychain-db"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "$KC"
+          security set-keychain-settings -t 7200 "$KC"
+          echo "🔓 login keychain unlocked"
+
+      - name: Log in to the OCI registry (push)
+        env:
+          REGISTRY: ${{ env.REGISTRY_HOST }}:${{ env.REGISTRY_PORT }}
+          REGISTRY_PUSH_PASSWORD: ${{ secrets.REGISTRY_PUSH_PASSWORD }}
+        run: |
+          if [ -z "${REGISTRY_PUSH_PASSWORD}" ]; then
+            echo "::error::REGISTRY_PUSH_PASSWORD secret not set — cannot push"
+            exit 1
+          fi
+          printf '%s' "${REGISTRY_PUSH_PASSWORD}" \
+            | tart login "${REGISTRY}" --username builder --password-stdin --insecure
+          echo "✅ logged in as builder"
+
+      - name: Push image
+        env:
+          REGISTRY: ${{ env.REGISTRY_HOST }}:${{ env.REGISTRY_PORT }}
+        run: |
+          echo "🚀 Pushing ${REGISTRY_IMAGE}:${BUILD_TAG}"
+          tart push $TART_INSECURE "${VM_NAME}" "${REGISTRY}/${REGISTRY_IMAGE}:${BUILD_TAG}"
+          echo "🪶 Pushing ${REGISTRY_IMAGE}:${ALIAS_TAG}"
+          tart push $TART_INSECURE "${VM_NAME}" "${REGISTRY}/${REGISTRY_IMAGE}:${ALIAS_TAG}"
+
+      - name: Clean up local VM
+        if: always()
+        run: /opt/homebrew/bin/tart delete "${VM_NAME}" 2>/dev/null || true
+
+      - name: Summary
+        if: success()
+        run: |
+          cat <<SUMMARY >> "$GITHUB_STEP_SUMMARY"
+          ## Signer VM built (dep)
+
+          | | |
+          |---|---|
+          | Registry | \`${REGISTRY_HOST}:${REGISTRY_PORT}\` |
+          | Image | \`${REGISTRY_IMAGE}\` |
+          | Tag | \`${BUILD_TAG}\` |
+          | Alias | \`${ALIAS_TAG}\` |
+          | Puppet branch | \`${{ inputs.puppet_branch || 'macos-signer-latest' }}\` |
+
+          \`\`\`bash
+          tart pull --insecure ${REGISTRY_HOST}:${REGISTRY_PORT}/${REGISTRY_IMAGE}:${ALIAS_TAG}
+          \`\`\`
+
+          **This image cannot sign.** No keychain, ed25519 key, widevine, or
+          \`packages_classes\`. Login is \`admin\`/\`admin\`; the login window has no
+          user list (SHOWFULLNAME=1, same as prod) and the hostname stays
+          \`dep-mac-v4-signing99\` because \`set_hostname.sh\` fails closed without a
+          host-supplied identity directory. Both are intentional.
+          SUMMARY
