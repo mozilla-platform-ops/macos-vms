@@ -219,6 +219,39 @@ Both `run-puppet.sh` and `bootstrap_mojave.sh` retry **forever** on any
 not merely a safety net — but it also means a genuinely unfixable error hangs
 rather than fails. Hence the 45m `timeout` on both puppet phases here.
 
+### The build is network-sensitive — pin the FQDN
+
+`fw::roles::mac_signing` gates on the fully-qualified domain name:
+
+```puppet
+case $::fqdn {
+  /.*\.(mdc1|mdc2)\.mozilla\.com/: { ssh_from_rejh, ssh_from_mozvpn, nrpe }
+  default:                        { }   # silently skip other DCs
+}
+```
+
+So **where you build from changes what gets built.** On a laptop the guest's
+FQDN is something like `…​.mozilla.com`, the case falls through, and no pf rules
+are applied at all. On the self-hosted CI runner — which is on MDC1 — the guest
+resolved an `mdc1` FQDN, puppet applied rules permitting SSH only from the
+relops jump hosts and Mozilla VPN, and cut off Packer's own SSH session from the
+tart bridge mid-provision:
+
+```
+Provisioning step had errors ... dial tcp 192.168.64.144:22: i/o timeout
+```
+
+Phase 1 therefore sets `HostName` to a **fully-qualified name in the reserved
+`.invalid` domain** (`dep-mac-v4-signing99.vmbuild.invalid`) while leaving
+`ComputerName`/`LocalHostName` bare. `facter networking.hostname` still reports
+the short name — so the signer flavor still resolves to `dep` — but
+`networking.fqdn` can no longer match the datacenter pattern. The build is now
+identical wherever it runs, and phase 1 asserts both properties before puppet.
+
+**Consequence:** the shipped image has **no pf rules configured**. A deployed
+signer VM needs the firewall reconsidered — either its real FQDN matching on the
+deployed network, or filtering at the tart host.
+
 ### A ronin_puppet bug this surfaced
 
 `vault_agent` declares the `vault` gem `ensure => present` with **no version
