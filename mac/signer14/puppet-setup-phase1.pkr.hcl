@@ -24,6 +24,14 @@ variable "build_hostname" {
   default = "dep-mac-v4-signing99"
 }
 
+# Build-time DNS domain. Reserved `.invalid` per RFC 2606 so it can never
+# resolve. Pins $::fqdn away from the mdc1/mdc2 pattern that
+# fw::roles::mac_signing keys on — see the long comment in the hostname block.
+variable "build_domain" {
+  type    = string
+  default = "vmbuild.invalid"
+}
+
 # Signers track their own puppet branch, not master.
 # roles_profiles::profiles::mac_signing pins puppet::periodic to this.
 variable "puppet_branch" {
@@ -72,14 +80,44 @@ build {
       # Virtual Machine"), which matches no pattern — so running puppet before
       # setting this would build a PRODUCTION FIREFOX SIGNER image regardless of
       # the puppet role we set two lines down. Set it first, then assert it.
-      "echo 'Setting build-time hostname to ${var.build_hostname}...'",
+      #
+      # HostName is deliberately set to a FULLY QUALIFIED name in a reserved
+      # `.invalid` domain, while ComputerName/LocalHostName keep the bare name.
+      # That is not cosmetic — it pins `$::fqdn` to something predictable and
+      # stops the build inheriting the build host's DNS search domain.
+      #
+      # Why it matters: fw::roles::mac_signing gates on the FQDN —
+      #
+      #   case $::fqdn {
+      #     /.*\.(mdc1|mdc2)\.mozilla\.com/: { ssh_from_rejh, ssh_from_mozvpn, ... }
+      #     default: { }   # silently skip other DCs
+      #   }
+      #
+      # On a laptop off the datacenter domain that silently no-ops. On the
+      # self-hosted CI runner, which IS on MDC1, the guest resolved an mdc1 FQDN,
+      # so puppet applied pf rules permitting SSH only from the relops jump hosts
+      # and Mozilla VPN — and promptly cut off Packer's own SSH session from the
+      # tart bridge, mid-provision:
+      #
+      #   Provisioning step had errors ... dial tcp 192.168.64.144:22: i/o timeout
+      #
+      # Pinning the FQDN makes the build behave identically wherever it runs.
+      # NOTE the consequence: the shipped image has NO pf rules configured. A
+      # deployed signer VM needs the firewall reconsidered — either by its real
+      # FQDN matching on the deployed network, or by the tart host's own filtering.
+      "echo 'Setting build-time identity (bare name + pinned .invalid FQDN)...'",
       "echo admin | sudo -S scutil --set ComputerName  '${var.build_hostname}'",
       "echo admin | sudo -S scutil --set LocalHostName '${var.build_hostname}'",
-      "echo admin | sudo -S scutil --set HostName      '${var.build_hostname}'",
+      "echo admin | sudo -S scutil --set HostName      '${var.build_hostname}.${var.build_domain}'",
       "sudo dscacheutil -flushcache || true",
-      # Fail the build rather than produce a mislabelled signer image.
-      "test \"$(sudo scutil --get HostName)\" = '${var.build_hostname}' || { echo 'FATAL: hostname did not stick; refusing to run puppet'; exit 1; }",
-      "echo \"hostname is now $(sudo scutil --get HostName)\"",
+      # Fail the build rather than produce a mislabelled signer image. The short
+      # name is what mac_signing.pp switches on, so assert that specifically.
+      "SHORT=$(/opt/puppetlabs/bin/facter networking.hostname 2>/dev/null || scutil --get LocalHostName)",
+      "test \"$SHORT\" = '${var.build_hostname}' || { echo \"FATAL: short hostname is '$SHORT', wanted '${var.build_hostname}' — refusing to run puppet\"; exit 1; }",
+      # And assert the FQDN will NOT trip the datacenter-gated firewall profile.
+      "FQ=$(sudo scutil --get HostName)",
+      "echo \"identity: short=$SHORT fqdn=$FQ\"",
+      "case \"$FQ\" in *.mdc1.mozilla.com|*.mdc2.mozilla.com) echo 'FATAL: build FQDN matches the datacenter pattern; fw::roles::mac_signing would lock Packer out of its own SSH session'; exit 1;; esac",
 
       "echo 'Installing Rosetta 2...'",
       "echo admin | sudo -S softwareupdate --install-rosetta --agree-to-license",
