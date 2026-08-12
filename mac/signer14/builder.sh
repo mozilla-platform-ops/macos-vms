@@ -37,6 +37,11 @@ SKIP_BASE="${SKIP_BASE:-0}"
 SKIP_OS_UPDATE="${SKIP_OS_UPDATE:-0}"
 TARGET_LABEL="${TARGET_LABEL:-}"
 
+# Phase 1.6. Full Xcode (the signers run 16.2). By far the slowest step —
+# ~8 GB download plus a very slow xip expansion — so it is skippable while
+# iterating on the puppet phases.
+SKIP_XCODE="${SKIP_XCODE:-0}"
+
 if [[ ! -f "$VAULT_FILE" ]]; then
   echo "❌ Vault file not found at '$VAULT_FILE'"
   echo "pwd: $(pwd)"
@@ -99,6 +104,15 @@ else
     -var="vm_name=$VM_NAME" \
     -var="target_label=$TARGET_LABEL" \
     update-os.pkr.hcl
+fi
+
+# Phase 1.6: full Xcode, matching the signers (16.2)
+if [[ "$SKIP_XCODE" == "1" ]]; then
+  echo "⏭  Phase 1.6 (install-xcode) skipped — image will have CLT only, not full Xcode."
+else
+  packer build -force \
+    -var="vm_name=$VM_NAME" \
+    install-xcode.pkr.hcl
 fi
 
 # Phase 2: puppet run 1 (sets the build hostname first — see the file)

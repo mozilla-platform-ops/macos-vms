@@ -217,9 +217,12 @@ exists precisely to stop that.
 
 ## 🔎 Still to confirm against the hardware
 
-- `pkgutil --pkg-info=com.apple.pkg.CLTools_Executables` — phase 1 pins Xcode
-  CLT 16.4 (inherited from the M4 tester fleet); codesign/notarytool behavior is
-  part of what we're reproducing, so this should match.
+- ~~CLT version~~ — **resolved.** tester15's pinned Xcode 16.4 CLT cannot
+  install on Sonoma (`installer: macOS version 15.3 or later is required`), and
+  S3 holds only 16.4 and a 2020-era 12.2, so there is no Sonoma-appropriate pin.
+  The real signers therefore must get CLT from puppet's `macos_xcode_tools`
+  (`softwareupdate -i "$PROD"`); this image now does the same. Worth uploading a
+  Sonoma CLT to S3 if build reproducibility matters later.
 - `sudo profiles -P -o stdout` — full MDM profile list. The Developer ID CA
   trust payload is handled here, but the rest of the profile set has not been
   enumerated, and config profiles cannot be delivered to a non-enrolled guest.

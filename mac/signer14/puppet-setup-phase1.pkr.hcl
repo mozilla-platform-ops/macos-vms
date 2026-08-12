@@ -135,23 +135,44 @@ build {
       "rm -f /tmp/DeveloperIDG2CA.cer",
 
       # -----------------------------------------------------------------------
-      # Command Line Tools
+      # Command Line Tools — deliberately NOT pinned here (differs from tester15)
       # -----------------------------------------------------------------------
-      # Pinned rather than left to the non-deterministic `softwareupdate` catalog
-      # dance. Installs to /Library/Developer/CommandLineTools so the puppet
-      # macos_xcode_tools exec then no-ops (its guard is
-      # `unless test -d /Library/Developer/CommandLineTools/Library`).
+      # tester15 installs a pinned Xcode 16.4 CLT from S3 to avoid the slow,
+      # non-deterministic `softwareupdate` catalog dance. That cannot work on
+      # Sonoma:
       #
-      # TODO: 16.4 is what the M4 tester fleet pins. Confirm against the real
-      # signers — `pkgutil --pkg-info=com.apple.pkg.CLTools_Executables` on
-      # fx-mac-v4-signing01 — because codesign/notarytool behavior is part of
-      # what we are trying to reproduce here.
-      "echo 'Installing pinned Command Line Tools (Xcode 16.4) from S3...'",
-      "curl -o /tmp/clt.dmg https://ronin-puppet-package-repo.s3.us-west-2.amazonaws.com/macos/public/common/Command_Line_Tools_for_Xcode_16.4.dmg",
-      "hdiutil attach /tmp/clt.dmg -nobrowse -mountpoint /tmp/clt",
-      "echo admin | sudo -S installer -pkg '/tmp/clt/Command Line Tools.pkg' -target /",
-      "hdiutil detach /tmp/clt",
-      "rm -f /tmp/clt.dmg",
+      #   installer: macOS version 15.3 or later is required.
+      #
+      # Xcode 16.4's CLT requires macOS 15.3+, and the S3 bucket holds only two
+      # CLT images — 16.4 and a 2020-era 12.2 — so there is no Sonoma-appropriate
+      # pinned option to swap in. Which also means the real signers cannot be
+      # using the pinned path: they get CLT from puppet's macos_xcode_tools,
+      # whose exec runs `softwareupdate -i "$PROD"` and picks whatever the OS
+      # is offered. Let puppet do the same here.
+      #
+      # If a Sonoma CLT is ever uploaded to S3, pinning it would make this build
+      # faster and more reproducible. (macos/private/14/ does hold
+      # Command_Line_Tools_for_Xcode_15.3.dmg, but that prefix is private and the
+      # credential-free build cannot authenticate to it.)
+      #
+      # CLT must nevertheless be installed HERE, before the git clone below:
+      # `git` on macOS is a CLT shim, so without it the clone dies with
+      #   xcode-select: error: No developer tools were found and no install
+      #   could be requested (possibly because there is no active GUI session)
+      # and puppet — which would otherwise install CLT itself — cannot run,
+      # because it is the thing we are cloning. The sentinel file is what makes
+      # `softwareupdate` offer CLT headlessly; it is the same trick the
+      # macos_xcode_tools module uses, so puppet's exec then no-ops on its
+      # `test -d /Library/Developer/CommandLineTools/Library` guard.
+      "echo 'Installing Command Line Tools via softwareupdate (headless)...'",
+      "sudo touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress",
+      "PROD=$(softwareupdate -l 2>/dev/null | grep '\\*.*Command Line' | tail -n1 | sed 's/^[^C]* //')",
+      "test -n \"$PROD\" || { echo 'FATAL: softwareupdate offered no Command Line Tools'; exit 1; }",
+      "echo \"Selected: $PROD\"",
+      "sudo softwareupdate -i \"$PROD\" --verbose",
+      "sudo rm -f /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress",
+      "test -d /Library/Developer/CommandLineTools/Library || { echo 'FATAL: CLT did not install'; exit 1; }",
+      "git --version || { echo 'FATAL: git still unusable after CLT install'; exit 1; }",
 
       "echo 'Downloading Puppet from S3...'",
       "curl -o /tmp/puppet-agent-7.28.0-1-installer.pkg https://ronin-puppet-package-repo.s3.us-west-2.amazonaws.com/macos/public/common/puppet-agent-7.28.0-1-installer.pkg",

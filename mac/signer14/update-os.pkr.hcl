@@ -100,6 +100,11 @@ build {
       "fi",
 
       "echo \"Installing: $TARGET\"",
+      # Record what we started from so the post-reboot provisioner can tell a
+      # real update from a silent no-op. /var/tmp survives the reboot; /tmp does
+      # not. Without this the check below passes on an unchanged guest.
+      "sw_vers -productVersion > /var/tmp/.signer_os_before",
+      "echo \"$TARGET\" > /var/tmp/.signer_os_target",
       # --restart is required; without it softwareupdate hangs at
       # "Downloaded: macOS [...]" (see the ansible role's comment on the same bug).
       "sudo softwareupdate --install --agree-to-license --force --restart --user admin --stdinpass <<<'admin' \"$TARGET\" || true",
@@ -117,6 +122,22 @@ build {
       # $$ escapes HCL interpolation so the shell gets ${VER%%.*}
       "MAJOR=$${VER%%.*}",
       "test \"$MAJOR\" = '14' || { echo \"FATAL: left macOS 14 (now $VER) — this image must stay on Sonoma\"; exit 1; }",
+      # Detect the silent no-op. `softwareupdate` can download an update, fail to
+      # personalize it, and still exit cleanly — leaving the guest untouched. A
+      # check for "still macOS 14" passes in exactly that case, so compare
+      # against what we actually started from.
+      "BEFORE=$(cat /var/tmp/.signer_os_before 2>/dev/null || echo '')",
+      "TARGET=$(cat /var/tmp/.signer_os_target 2>/dev/null || echo '')",
+      "rm -f /var/tmp/.signer_os_before /var/tmp/.signer_os_target",
+      "if [ -n \"$TARGET\" ] && [ \"$VER\" = \"$BEFORE\" ]; then",
+      "  echo \"FATAL: '$TARGET' was selected but the guest is still on $VER.\"",
+      "  echo '       In-place macOS updates generally FAIL inside a Tart/VZ guest:'",
+      "  echo '         MobileSoftwareUpdateErrorDomain 1256 - Failed to find SFR recovery volume'",
+      "  echo '       A VM cannot personalize an OS update the way real hardware can.'",
+      "  echo '       Change the image version by restoring from a different IPSW'",
+      "  echo '       (phase 1) instead, or run with SKIP_OS_UPDATE=1.'",
+      "  exit 1",
+      "fi",
       "echo \"Base image is now macOS $VER (fleet reference: 14.7.5 / 23H527)\"",
       "test \"$VER\" = '14.7.5' && echo 'Exact match with the fleet.' || echo 'NOTE: differs from the fleet 14.7.5 — see the caveat in update-os.pkr.hcl.'",
     ]
