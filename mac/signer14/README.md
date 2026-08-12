@@ -259,6 +259,24 @@ template, not a deployable worker. Iteration 2 needs a `vault-inject`
 equivalent that runs puppet again *after* `set_hostname.sh` has applied the
 allocated identity.
 
+### ⚠️ The shipped image cannot currently run puppet on boot
+
+Phase 2 pins the image's runtime `PUPPET_BRANCH` to **`macos-signer-latest`**,
+which is the branch the signer fleet tracks. As of 2026-08-12 that branch does
+**not** contain `roles_profiles::roles::mac_v4_signing_dep_vms` — the role
+merged to `master` (ronin_puppet#1325) and `macos-signer-latest` lags master by
+several commits.
+
+So a deployed VM that runs `run-puppet.sh` would fail to compile its catalog
+("could not find class") and then **retry forever**, because the bootstrap
+scripts never give up. This does not affect a smoke test — nothing re-runs
+puppet unless you ask it to — but it must be resolved before the image is
+deployed anywhere.
+
+Fix is to advance `macos-signer-latest`. That is a fleet-affecting change (it
+is the branch every prod signer tracks), so it is deliberately **not** bundled
+with this image work.
+
 Note also that `packages_classes` is absent from the fake vault, so
 `packages_installed` is a no-op and nothing from `packages::` is installed. The
 real list lives in the prod vault and is needed before the image is functional.
