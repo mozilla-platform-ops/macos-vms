@@ -187,6 +187,55 @@ build {
       "echo '${var.puppet_role}' | sudo tee /etc/puppet_role > /dev/null",
       "sudo chmod 644 /etc/puppet_role",
 
+      # -----------------------------------------------------------------------
+      # Pre-install the `vault` puppet gem with a pinned connection_pool
+      # -----------------------------------------------------------------------
+      # vault_agent declares `package { 'vault-puppetpath-gem': name => 'vault',
+      # provider => puppet_gem }` with ensure => present and NO version pin. On a
+      # fresh host today that cannot succeed:
+      #
+      #   vault requires Ruby version >= 3.1. The current ruby version is 2.7.8.225.
+      #   connection_pool requires Ruby version >= 3.2.0.
+      #
+      # Puppet 7.28 bundles Ruby 2.7.8. The vault gem dropped Ruby 2.7 in 0.19.0
+      # (2025-12-04) and its connection_pool dependency did the same, so an
+      # unpinned `gem install vault` resolves to something uninstallable. The
+      # newest usable pair on Ruby 2.7.8 is vault 0.18.2 (2023-11-27) and
+      # connection_pool 2.5.5. Installing those satisfies puppet's
+      # `ensure => present` and the resource no-ops.
+      #
+      # NB this is NOT a VM problem — it is a live latent bug in ronin_puppet.
+      # Existing signers have the gem from before the cutoff so they never
+      # re-resolve it, but ANY signer provisioned from scratch since Dec 2025 —
+      # including a replacement for a dead host — fails here. vault_agent should
+      # pin these versions. Tracked separately from this image work.
+      "echo 'Pre-installing vault puppet gem (pinned for Ruby 2.7.8)...'",
+      "sudo /opt/puppetlabs/puppet/bin/gem install --no-document connection_pool -v 2.5.5",
+      "sudo /opt/puppetlabs/puppet/bin/gem install --no-document vault -v 0.18.2",
+      "sudo /opt/puppetlabs/puppet/bin/gem list | grep -E '^(vault|connection_pool) ' || { echo 'FATAL: vault gem not installed'; exit 1; }",
+
+      # -----------------------------------------------------------------------
+      # Stub out the widevine clone
+      # -----------------------------------------------------------------------
+      # signing_worker clones mozilla-services/widevine (a PRIVATE repo) using
+      # widevine_config.user/key as a GitHub token. A credential-free build has
+      # only the fake token, so the clone returns 128 — and because both
+      # run-puppet.sh and bootstrap_mojave.sh retry forever on any `Error:`, that
+      # single failure means the build can never converge.
+      #
+      # The clone exec is guarded by `unless test -d <base>/widevine/src`, so
+      # pre-creating that directory makes puppet skip it. The dependent
+      # `uv pip install .` is refreshonly on the clone, so it is skipped too.
+      #
+      # This is a genuine gap, not a fix: the image ends up WITHOUT widevine,
+      # alongside the keychain / ed25519 key / signing certs it also lacks. It is
+      # honest for an image that cannot sign anyway, and it must be revisited
+      # when real credentials enter the picture. Only the five dep users with a
+      # widevine_filename need it; vpnbld has none.
+      "echo 'Stubbing widevine clone (needs a real GitHub token)...'",
+      "for b in dep1 dep2 enterprisebld tb-dep adhoc-dep; do sudo mkdir -p \"/usr/local/builds/$b/widevine/src\"; done",
+      "ls -d /usr/local/builds/*/widevine/src",
+
       "echo 'Downloading run-puppet.sh...'",
       "curl -o /tmp/run-puppet.sh https://ronin-puppet-package-repo.s3.us-west-2.amazonaws.com/macos/public/common/run-puppet.sh",
       "chmod +x /tmp/run-puppet.sh",
@@ -209,8 +258,20 @@ build {
       "sudo chmod 644 /opt/puppet_environments/ronin_settings",
       "cat /opt/puppet_environments/ronin_settings",
 
+      # Idempotent: a bare `git clone` into an existing directory exits 128, so
+      # re-running this phase on an already-provisioned VM (or a checkpoint
+      # snapshot) would always fail. Fetch and hard-reset instead when the repo
+      # is already there — which is also what run-puppet.sh does on every run.
       "echo 'Pre-seeding Puppet repo from branch ${var.puppet_branch}...'",
-      "sudo git clone --branch ${var.puppet_branch} https://github.com/mozilla-platform-ops/ronin_puppet.git /opt/puppet_environments/mozilla-platform-ops/ronin_puppet",
+      "R=/opt/puppet_environments/mozilla-platform-ops/ronin_puppet",
+      "if [ -d \"$R/.git\" ]; then",
+      "  echo 'Repo already present; fetching ${var.puppet_branch} instead of cloning.'",
+      "  sudo git -C \"$R\" fetch origin ${var.puppet_branch}",
+      "  sudo git -C \"$R\" checkout -B ${var.puppet_branch} FETCH_HEAD",
+      "else",
+      "  sudo git clone --branch ${var.puppet_branch} https://github.com/mozilla-platform-ops/ronin_puppet.git \"$R\"",
+      "fi",
+      "sudo git -C \"$R\" log --oneline -1",
 
       "echo 'Running run-puppet.sh (pass 1)...'",
       "echo admin | sudo -S /tmp/run-puppet.sh || echo 'Puppet pass 1 completed with errors; phase 2 will retry.'",
