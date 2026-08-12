@@ -177,6 +177,53 @@ That is expected at this stage, not a bug.
 
 ---
 
+## ✅ What has actually been validated
+
+Measured on a real build (2026-08-12), not inferred:
+
+- **The dep role converges.** Both puppet phases green, zero `Error:` lines,
+  `BUILDER_EXIT=0`.
+- **Xcode 16.2 (16C5032a)** and **CLT for Xcode 16.2** — matching
+  `fx-mac-v4-signing01` exactly. `softwareupdate` picks the matching CLT on its
+  own; no pin needed.
+- All six dep scriptworker users created with home directories.
+- `certs/` present, empty, `0700`.
+- Image seals clean: no vault on disk, branch override reset to
+  `macos-signer-latest` and asserted.
+- Setup Assistant automation works on Sonoma unmodified (15m26s to SSH).
+
+### The retry loop is load-bearing
+
+Worth internalising before reading a failed build as broken. A from-scratch
+apply goes **16 unique errors → 9 → 0**. `uv venv` runs as the scriptworker user
+and writes `~/.cache/uv`, but nothing orders it after `users::home_dir` creates
+`/Users/<user>`, so it fails on the first pass and succeeds once the home
+exists.
+
+Both `run-puppet.sh` and `bootstrap_mojave.sh` retry **forever** on any
+`Error:` (10-minute sleeps in the latter). That is the convergence mechanism,
+not merely a safety net — but it also means a genuinely unfixable error hangs
+rather than fails. Hence the 45m `timeout` on both puppet phases here.
+
+### A ronin_puppet bug this surfaced
+
+`vault_agent` declares the `vault` gem `ensure => present` with **no version
+pin**. Puppet 7.28 bundles Ruby 2.7.8; `vault` dropped 2.7 in 0.19.0
+(2025-12-04) and `connection_pool` did likewise. So an unpinned install now
+resolves to something uninstallable:
+
+```
+vault requires Ruby version >= 3.1. The current ruby version is 2.7.8.225.
+```
+
+Existing signers are unaffected — their gems predate the cutoff and
+`ensure => present` never re-resolves. But **any signer provisioned from
+scratch since Dec 2025 fails here**, inside the forever-retry loop. This build
+works around it by pre-installing vault 0.18.2 / connection_pool 2.5.5; the
+real fix is pinning them in `vault_agent`.
+
+---
+
 ## 🛑 Where this stops
 
 This iteration is scoped to *"does the dep signer role converge in a VM"*. It
@@ -185,6 +232,10 @@ deliberately does **not** include:
 - vault.yaml injection (no `vault-inject.sh` equivalent yet)
 - the vault AppRole id/secret pair
 - any signing material
+- **widevine** — `signing_worker` clones a *private* repo using
+  `widevine_config.user`/`key` as a GitHub token. A credential-free build only
+  has the fake one, so phase 1 pre-creates `<base>/widevine/src` to trip the
+  exec's own `unless` guard and skip it. A declared gap, not a fix.
 - a first-boot puppet re-run
 
 Because there is no re-run yet, the image ships with worker configs naming
@@ -226,8 +277,17 @@ exists precisely to stop that.
 - `sudo profiles -P -o stdout` — full MDM profile list. The Developer ID CA
   trust payload is handled here, but the rest of the profile set has not been
   enumerated, and config profiles cannot be delivered to a non-enrolled guest.
-- `which uv` — `signing_worker` runs `uv venv` / `uv sync`, but there is no
-  `packages::uv` class. Where does it come from on the hardware?
+- ~~`which uv`~~ — **resolved.** `uv` is present in the guest and works;
+  the `uv venv` failures were a home-directory race, not a missing binary
+  (see "the retry loop is load-bearing" above).
+- ~~Xcode version~~ — **resolved.** `fx-mac-v4-signing01` runs Xcode 16.2
+  (16C5032a), which is also the newest Xcode Sonoma supports, so the fleet is at
+  its OS ceiling rather than lagging. `install-xcode.pkr.hcl` pulls the matching
+  `Xcode_16.2.xip` already staged in S3.
+- **Xcode arrives via SimpleMDM on the hardware**, auto-deployed on group
+  assignment — not by hand, and not by puppet (`macos_xcodes_installer` is
+  included by no role and only drops the `xcodes` CLI helper). Tart guests are
+  not MDM-enrolled, hence the dedicated phase here.
 - `/etc/vault_approle_secret` is **zero bytes** and `/etc/vault_token` does not
   exist on `fx-mac-v4-signing01`, which suggests the vault-agent AppRole auth is
   not actually working there. Worth checking `/var/log/vault-agent.log` on the
