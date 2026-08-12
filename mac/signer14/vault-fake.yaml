@@ -1,0 +1,127 @@
+---
+# NON-SECRET build-time vault for the dep signer image. Safe to commit.
+#
+# Every value here is obvious garbage. Nothing in this file authenticates to
+# anything, and the image ships with the file removed (see phase 2). Its only
+# job is to satisfy the `lookup()` calls that have no default value, so puppet
+# can COMPILE and converge during the build.
+#
+# ---------------------------------------------------------------------------
+# WHAT IS DELIBERATELY NOT HERE
+# ---------------------------------------------------------------------------
+# * packages_classes    — `lookup('packages_classes', Array[String], 'unique', [])`
+#                         defaults to [], so packages_installed becomes a no-op.
+#                         The real list lives in the prod vault. Consequence:
+#                         nothing from packages:: is installed in this image,
+#                         which is fine for "does the role converge" and NOT
+#                         fine for a functional signer. Source the real list
+#                         before iteration 2.
+# * signing material    — the keychain, ed25519_privkey and widevine cert are
+#                         not puppet-managed at all; signing_worker only creates
+#                         an empty 0700 certs/ directory. They are hand-placed
+#                         on the bare-metal signers and are out of scope here.
+# * vault approle       — /etc/vault_approle_id and /etc/vault_approle_secret
+#                         are declared `replace => false`, so puppet never
+#                         writes them and their absence does not fail a run.
+#
+# Keys whose absence WOULD fail compilation are all present below.
+
+# --------------------------------------------------------------------------
+# Referenced by data/roles/mac_v4_signing_dep_vms.yaml, which maps
+#   papertrail.host -> "%{lookup('vault_secrets::papertrail.data.host')}"
+# An interpolation against a missing key is a hard failure, so this must exist.
+# The port is read back through Integer(), so it has to parse as a number.
+# --------------------------------------------------------------------------
+vault_secrets::papertrail:
+  data:
+    host: "papertrail.invalid"
+    port: "12345"
+
+# roles_profiles::profiles::mac_signing, no default value.
+# On a real signer this is a GitHub token used to clone mozilla-services/widevine.
+# With a fake token that clone fails; the rest of the catalog still applies.
+widevine_config:
+  user: "fake-widevine-user-not-real"
+  key: "fake-widevine-token-0000000000000000000000"
+
+# roles_profiles::profiles::mac_signing -> class { 'telegraf': }, no default.
+telegraf:
+  user: "fake-telegraf-user"
+  password: "fake-telegraf-password-0000000000"
+
+# --------------------------------------------------------------------------
+# Per-scriptworker-user credentials.
+#
+# mac_signing.pp does lookup("${user}_user.password"|"...salt"|"...iterations")
+# with NO default for every user in scriptworker_users.dep, and feeds them to
+# signing_worker::system_user. All six dep users must be present or the catalog
+# will not compile.
+#
+# These create real local accounts in the image with these fake passwords. That
+# is acceptable only because the image is not reachable except through its Tart
+# host and carries no signing material. Revisit when real credentials enter the
+# picture.
+# --------------------------------------------------------------------------
+depbld1_user: &fake_signing_user
+  password: "fake-not-a-real-password-9f2b41c7d8e05a63"
+  salt: "fake-salt-3c7d19aeb45602f8d1e93a70c86b25f4"
+  iterations: "40000"
+
+depbld2_user: *fake_signing_user
+enterprisebld_user: *fake_signing_user
+tbbld_user: *fake_signing_user
+vpnbld_user: *fake_signing_user
+adhocbld_user: *fake_signing_user
+
+# --------------------------------------------------------------------------
+# Deep-merged over scriptworker_config.dep from common.yaml.
+#
+# These have a `{}` default so they are not compilation-critical, and the ERB
+# templates render a missing key as an empty string rather than erroring. They
+# are included so the generated scriptworker.yaml is structurally complete and
+# obviously fake, instead of structurally complete and silently blank.
+#
+# dep covers five cot_products, so all five client id / token pairs appear.
+# --------------------------------------------------------------------------
+scriptworker_secrets:
+  dep:
+    ff_taskcluster_client_id: "project/releng/scriptworker/fake-dep"
+    ff_taskcluster_access_token: "fake-access-token-0000000000000000"
+    enterprise_taskcluster_client_id: "project/releng/scriptworker/fake-dep"
+    enterprise_taskcluster_access_token: "fake-access-token-0000000000000000"
+    tb_taskcluster_client_id: "project/releng/scriptworker/fake-dep"
+    tb_taskcluster_access_token: "fake-access-token-0000000000000000"
+    vpn_taskcluster_client_id: "project/releng/scriptworker/fake-dep"
+    vpn_taskcluster_access_token: "fake-access-token-0000000000000000"
+    adhoc_taskcluster_client_id: "project/releng/scriptworker/fake-dep"
+    adhoc_taskcluster_access_token: "fake-access-token-0000000000000000"
+    github_oauth_token: "fake-github-oauth-token-000000000000"
+
+# Deep-merged over signingworker_roles.dep from common.yaml. The nested key is
+# also 'dep' — signingworker_roles.dep.dep is the single role entry for the dep
+# workers. Same story as above: not compilation-critical, present so the
+# rendered script_config.yaml is legible.
+signing_secrets:
+  dep:
+    dep:
+      identity: "Fake Developer ID Application: Not Real (XXXXXXXXXX)"
+      keychain_password: "fake-keychain-password-000000"
+      pkg_cert_id: "Fake Developer ID Installer: Not Real (XXXXXXXXXX)"
+      widevine_user: "fake-widevine-user"
+      widevine_pass: "fake-widevine-pass"
+      omnija_user: "fake-omnija-user"
+      omnija_pass: "fake-omnija-pass"
+      langpack_user: "fake-langpack-user"
+      langpack_pass: "fake-langpack-pass"
+      stage_widevine_user: "fake-stage-widevine-user"
+      stage_widevine_pass: "fake-stage-widevine-pass"
+      stage_omnija_user: "fake-stage-omnija-user"
+      stage_omnija_pass: "fake-stage-omnija-pass"
+      stage_langpack_user: "fake-stage-langpack-user"
+      stage_langpack_pass: "fake-stage-langpack-pass"
+      gcp_prod_widevine_user: "fake-gcp-widevine-user"
+      gcp_prod_widevine_pass: "fake-gcp-widevine-pass"
+      gcp_prod_omnija_user: "fake-gcp-omnija-user"
+      gcp_prod_omnija_pass: "fake-gcp-omnija-pass"
+      gcp_prod_langpack_user: "fake-gcp-langpack-user"
+      gcp_prod_langpack_pass: "fake-gcp-langpack-pass"
