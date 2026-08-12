@@ -12,6 +12,14 @@ variable "vm_name" {
   default = "sonoma-signer-dep"
 }
 
+# The branch the SHIPPED image should track, regardless of what the build used.
+# Phase 1 may point run-puppet.sh at a feature branch via PUPPET_BRANCH; leaving
+# that baked into the image would make a deployed VM apply unreviewed code.
+variable "prod_puppet_branch" {
+  type    = string
+  default = "macos-signer-latest"
+}
+
 source "tart-cli" "puppet-setup-phase2" {
   vm_name      = "${var.vm_name}"
   cpu_count    = 4
@@ -37,6 +45,8 @@ build {
   }
 
   provisioner "shell" {
+    # See phase 1: run-puppet.sh retries a failed apply forever, so bound it.
+    timeout = "45m"
     inline = [
 
       # Keep the VM awake and out of the screensaver, same as the tester image.
@@ -74,6 +84,19 @@ build {
 
       # Assert it. Cheap, and the whole security story rests on it.
       "test ! -f /var/root/vault.yaml || { echo 'FATAL: vault.yaml survived cleanup'; exit 1; }",
+
+      # -----------------------------------------------------------------------
+      # Reset the puppet branch override to the production branch
+      # -----------------------------------------------------------------------
+      # Phase 1 may have pointed run-puppet.sh at a feature branch while the VM
+      # role was still in review. Shipping that would mean a deployed signer VM
+      # applies unreviewed puppet code on every run — so pin the image back to
+      # the branch the signer fleet actually tracks.
+      "echo 'Pinning shipped image to puppet branch ${var.prod_puppet_branch}...'",
+      "sudo sh -c 'echo \"PUPPET_BRANCH=${var.prod_puppet_branch}\" > /opt/puppet_environments/ronin_settings'",
+      "sudo chmod 644 /opt/puppet_environments/ronin_settings",
+      "grep -q '^PUPPET_BRANCH=${var.prod_puppet_branch}$' /opt/puppet_environments/ronin_settings || { echo 'FATAL: puppet branch override not reset'; exit 1; }",
+      "cat /opt/puppet_environments/ronin_settings",
 
       # The signing material (keychain, ed25519_privkey, widevine cert) is NOT
       # in this image and is not supposed to be — puppet only creates the empty

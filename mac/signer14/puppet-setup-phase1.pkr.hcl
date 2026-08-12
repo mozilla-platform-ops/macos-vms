@@ -56,6 +56,11 @@ build {
   }
 
   provisioner "shell" {
+    # run-puppet.sh's retry loop is UNBOUNDED: on a failed apply it fetches,
+    # finds no new commits, sleeps 60s and tries again, forever. Without a
+    # timeout a broken catalog hangs the build indefinitely instead of failing
+    # it — seen for real when the role was missing from the branch being used.
+    timeout = "45m"
     inline = [
 
       # -----------------------------------------------------------------------
@@ -189,8 +194,22 @@ build {
       # Signers track macos-signer-latest, NOT master. The tester pipeline
       # hardcodes master; copying that here would build against code the signer
       # fleet is not running.
-      "echo 'Pre-seeding Puppet repo from branch ${var.puppet_branch}...'",
+      #
+      # Pre-seeding the clone is NOT sufficient on its own. run-puppet.sh does
+      # its own `git fetch origin "$GIT_BRANCH"` + `git reset --hard`, so it will
+      # throw away whatever we checked out and snap the repo back to its own
+      # idea of the branch — which defaults to master. Observed doing exactly
+      # that: "HEAD is now at 65d8a5d8", i.e. origin/master.
+      #
+      # The supported override is /opt/puppet_environments/ronin_settings, which
+      # run-puppet.sh sources before defaulting PUPPET_BRANCH. Write it first.
+      "echo 'Setting puppet branch override to ${var.puppet_branch}...'",
       "sudo mkdir -p /opt/puppet_environments/mozilla-platform-ops",
+      "sudo sh -c 'echo \"PUPPET_BRANCH=${var.puppet_branch}\" > /opt/puppet_environments/ronin_settings'",
+      "sudo chmod 644 /opt/puppet_environments/ronin_settings",
+      "cat /opt/puppet_environments/ronin_settings",
+
+      "echo 'Pre-seeding Puppet repo from branch ${var.puppet_branch}...'",
       "sudo git clone --branch ${var.puppet_branch} https://github.com/mozilla-platform-ops/ronin_puppet.git /opt/puppet_environments/mozilla-platform-ops/ronin_puppet",
 
       "echo 'Running run-puppet.sh (pass 1)...'",

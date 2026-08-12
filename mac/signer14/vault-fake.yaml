@@ -27,15 +27,48 @@
 # Keys whose absence WOULD fail compilation are all present below.
 
 # --------------------------------------------------------------------------
-# Referenced by data/roles/mac_v4_signing_dep_vms.yaml, which maps
-#   papertrail.host -> "%{lookup('vault_secrets::papertrail.data.host')}"
-# An interpolation against a missing key is a hard failure, so this must exist.
-# The port is read back through Integer(), so it has to parse as a number.
+# SHADOWING, not substitution — this is the whole trick, and it is easy to get
+# wrong.
+#
+# data/roles/mac_v4_signing_dep_vms.yaml defines:
+#
+#   papertrail:
+#     host: "%{lookup('vault_secrets::papertrail.data.host')}"
+#     port: "%{lookup('vault_secrets::papertrail.data.port')}"
+#
+# Any key namespaced `vault_secrets::` is resolved by modules/vault_secrets/
+# hiera.yaml, whose only hierarchy level is `lookup_key: hiera_vault` — a live
+# Vault server. A credential-free build cannot reach it, and merely loading that
+# backend fails outright:
+#
+#   Function Load Error for function 'hiera_vault':
+#   [hiera-vault] Must install vault gem to use hiera-vault backend
+#
+# Defining `vault_secrets::papertrail` HERE does not help: the failure happens
+# when the vault_secrets module's data provider initialises, not when the value
+# is missing.
+#
+# What does work is the global hierarchy order in hiera.yaml:
+#
+#   secrets/vault.yaml        <-- this file, HIGHEST priority
+#   roles/%{puppet_role}.yaml <-- where the vault_secrets:: interpolation lives
+#   os/%{os.family}.yaml
+#   common.yaml
+#
+# Because this file outranks the role file, defining the OUTER key `papertrail`
+# here means the role file's version is never selected and its interpolation is
+# never evaluated. That is exactly how mac/tester15/vault-fake.yaml works — it
+# defines `cltbld_user` and `generic_worker`, not `vault_secrets::cltbld_user`,
+# even though its role data is full of `vault_secrets::` references.
+#
+# Rule of thumb: mirror the key names used in data/roles/<role>.yaml, never the
+# `vault_secrets::` names they interpolate.
+#
+# The port is read back through Integer(), so it must parse as a number.
 # --------------------------------------------------------------------------
-vault_secrets::papertrail:
-  data:
-    host: "papertrail.invalid"
-    port: "12345"
+papertrail:
+  host: "papertrail.invalid"
+  port: "12345"
 
 # roles_profiles::profiles::mac_signing, no default value.
 # On a real signer this is a GitHub token used to clone mozilla-services/widevine.
@@ -57,14 +90,23 @@ telegraf:
 # signing_worker::system_user. All six dep users must be present or the catalog
 # will not compile.
 #
-# These create real local accounts in the image with these fake passwords. That
-# is acceptable only because the image is not reachable except through its Tart
-# host and carries no signing material. Revisit when real credentials enter the
-# picture.
+# These create real local accounts in the image. Puppet's macOS user provider
+# validates the FORMAT of both values and refuses anything else:
+#
+#   password: "OS X versions > 10.7 require a Salted SHA512 PBKDF2 password
+#              hash of 256 characters"
+#   salt:     "macOS versions 10.15 and higher require the salt to be 32-bytes
+#              ... the length of the salt's string must be 64"
+#
+# so a human-readable "this-is-fake" string does not work here, however much
+# clearer it would be. These are 256 and 64 hex characters respectively, chosen
+# to spell obvious nonsense (deadbeef / fa11) rather than look like real
+# entropy. They are not a valid PBKDF2 hash of any password, which is the point:
+# the resulting accounts have no usable password at all.
 # --------------------------------------------------------------------------
 depbld1_user: &fake_signing_user
-  password: "fake-not-a-real-password-9f2b41c7d8e05a63"
-  salt: "fake-salt-3c7d19aeb45602f8d1e93a70c86b25f4"
+  password: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+  salt: "fa11fa11fa11fa11fa11fa11fa11fa11fa11fa11fa11fa11fa11fa11fa11fa11"
   iterations: "40000"
 
 depbld2_user: *fake_signing_user
