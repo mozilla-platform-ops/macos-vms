@@ -224,8 +224,21 @@ build {
       # single failure means the build can never converge.
       #
       # The clone exec is guarded by `unless test -d <base>/widevine/src`, so
-      # pre-creating that directory makes puppet skip it. The dependent
-      # `uv pip install .` is refreshonly on the clone, so it is skipped too.
+      # pre-creating that directory makes puppet skip it.
+      #
+      # That alone is not the whole story. The dependent `uv pip install .` is
+      # refreshonly but subscribes to BOTH the clone and
+      # Exec["install <base> virtualenv"], so it still fires once — on the apply
+      # where the venv is first created — and fails, because <base>/widevine
+      # holds nothing but an empty src/. It then stops firing, since neither
+      # subscription changes again. Convergence therefore takes three applies:
+      #
+      #   #1  uv venv fails (home-directory race, see README)
+      #   #2  uv venv succeeds -> refreshes widevine install -> fails
+      #   #3  nothing to refresh -> 0 errors -> success
+      #
+      # Measured end to end from a bare 14.6.1 base. Do not read the widevine
+      # errors in applies #1-2 as a broken build.
       #
       # This is a genuine gap, not a fix: the image ends up WITHOUT widevine,
       # alongside the keychain / ed25519 key / signing certs it also lacks. It is

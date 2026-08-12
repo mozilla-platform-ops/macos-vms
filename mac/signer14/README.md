@@ -194,11 +194,25 @@ Measured on a real build (2026-08-12), not inferred:
 
 ### The retry loop is load-bearing
 
-Worth internalising before reading a failed build as broken. A from-scratch
-apply goes **16 unique errors → 9 → 0**. `uv venv` runs as the scriptworker user
+Worth internalising before reading a failed build as broken. **A clean build
+from a bare 14.6.1 base takes three puppet applies to converge**, and the first
+two are full of alarming errors:
+
+| apply | `uv venv` errors | widevine errors | outcome |
+|---|---|---|---|
+| #1 | 12 | 15 | home-directory race |
+| #2 | 0 | 20 | venv created → refreshed the widevine install → failed |
+| #3 | 0 | 0 | **succeeded** |
+
+Two independent causes stack up here. `uv venv` runs as the scriptworker user
 and writes `~/.cache/uv`, but nothing orders it after `users::home_dir` creates
-`/Users/<user>`, so it fails on the first pass and succeeds once the home
-exists.
+`/Users/<user>` — so it fails on the first pass. Then the widevine install exec
+is `refreshonly` but subscribes to *both* the clone and the virtualenv exec, so
+it fires exactly once (when the venv appears) against the stubbed-out widevine
+directory, fails, and never fires again.
+
+Neither is fixable from this repo, and both clear themselves. Phase 1 takes
+~12 minutes as a result.
 
 Both `run-puppet.sh` and `bootstrap_mojave.sh` retry **forever** on any
 `Error:` (10-minute sleeps in the latter). That is the convergence mechanism,
