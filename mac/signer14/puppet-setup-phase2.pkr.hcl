@@ -123,8 +123,12 @@ build {
       "sudo install -m 0600 -o root -g wheel /tmp/vault-fake.yaml /usr/local/share/signer14/vault-fake.yaml",
       "sudo install -m 0755 -o root -g wheel /tmp/puppet-dryrun.sh /usr/local/bin/signer14-puppet-dryrun.sh",
       "rm -f /tmp/vault-fake.yaml /tmp/puppet-dryrun.sh",
-      # The staged copy must not be mistaken for a live secret.
-      "grep -q 'NON-SECRET' /usr/local/share/signer14/vault-fake.yaml || { echo 'FATAL: staged vault is not the fake one'; exit 1; }",
+      # The staged copy must not be mistaken for a live secret. NB the sudo:
+      # the file is installed 0600 root:wheel (correct for anything
+      # vault-shaped), and these provisioners run as `admin`, so an unprivileged
+      # grep gets permission denied and the assertion fires on a perfectly good
+      # file. That is exactly how this failed the first time.
+      "sudo grep -q 'NON-SECRET' /usr/local/share/signer14/vault-fake.yaml || { echo 'FATAL: staged vault is not the fake one'; exit 1; }",
       "test ! -f /var/root/vault.yaml || { echo 'FATAL: staging the dry-run vault polluted /var/root'; exit 1; }",
 
       # -----------------------------------------------------------------------
