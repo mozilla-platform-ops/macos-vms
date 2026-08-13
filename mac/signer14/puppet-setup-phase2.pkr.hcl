@@ -15,9 +15,20 @@ variable "vm_name" {
 # The branch the SHIPPED image should track, regardless of what the build used.
 # Phase 1 may point run-puppet.sh at a feature branch via PUPPET_BRANCH; leaving
 # that baked into the image would make a deployed VM apply unreviewed code.
+#
+# TEMPORARY: `master`, not `macos-signer-latest`. The signer fleet tracks
+# macos-signer-latest, but that branch does not yet carry
+# roles_profiles::roles::mac_v4_signing_dep_vms (the role merged to master in
+# ronin_puppet#1325). Pinning the image at macos-signer-latest meant puppet could
+# not compile its catalog at all — so the image could never be exercised beyond
+# the build. Pointing at master lets a tester actually run puppet and see how far
+# it gets.
+#
+# REVERT TO 'macos-signer-latest' once that branch carries the role, so the image
+# tracks what the fleet really runs.
 variable "prod_puppet_branch" {
   type    = string
-  default = "macos-signer-latest"
+  default = "master"
 }
 
 source "tart-cli" "puppet-setup-phase2" {
@@ -42,6 +53,19 @@ build {
   provisioner "file" {
     source      = "com.mozilla.sethostname.plist"
     destination = "/tmp/com.mozilla.sethostname.plist"
+  }
+
+  # Shipped so a tester can exercise puppet without real credentials. Staged to
+  # /usr/local/share/, NOT /var/root/vault.yaml — the image stays credential-free
+  # at rest and phase 2 still asserts that.
+  provisioner "file" {
+    source      = "vault-fake.yaml"
+    destination = "/tmp/vault-fake.yaml"
+  }
+
+  provisioner "file" {
+    source      = "puppet-dryrun.sh"
+    destination = "/tmp/puppet-dryrun.sh"
   }
 
   provisioner "shell" {
@@ -84,6 +108,24 @@ build {
 
       # Assert it. Cheap, and the whole security story rests on it.
       "test ! -f /var/root/vault.yaml || { echo 'FATAL: vault.yaml survived cleanup'; exit 1; }",
+
+      # -----------------------------------------------------------------------
+      # Ship an opt-in puppet dry-run
+      # -----------------------------------------------------------------------
+      # run-puppet.sh hard-fails without /var/root/vault.yaml, so the shipped
+      # image cannot be exercised beyond the build without staging one. Rather
+      # than ship a vault at rest — which would undo the assertion above and
+      # hand com.mozilla.periodic.plist (900s interval) a way to start applying
+      # puppet unattended — ship the obviously-fake build vault somewhere inert
+      # plus a wrapper that stages it, runs puppet, and removes it on exit.
+      "echo 'Installing the opt-in puppet dry-run helper...'",
+      "sudo mkdir -p /usr/local/share/signer14",
+      "sudo install -m 0600 -o root -g wheel /tmp/vault-fake.yaml /usr/local/share/signer14/vault-fake.yaml",
+      "sudo install -m 0755 -o root -g wheel /tmp/puppet-dryrun.sh /usr/local/bin/signer14-puppet-dryrun.sh",
+      "rm -f /tmp/vault-fake.yaml /tmp/puppet-dryrun.sh",
+      # The staged copy must not be mistaken for a live secret.
+      "grep -q 'NON-SECRET' /usr/local/share/signer14/vault-fake.yaml || { echo 'FATAL: staged vault is not the fake one'; exit 1; }",
+      "test ! -f /var/root/vault.yaml || { echo 'FATAL: staging the dry-run vault polluted /var/root'; exit 1; }",
 
       # -----------------------------------------------------------------------
       # Reset the puppet branch override to the production branch

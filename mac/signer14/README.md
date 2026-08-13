@@ -51,11 +51,11 @@ scheme here would hit the default case every time. Consequently:
 
 | | tester15 | signer14 | why |
 |---|---|---|---|
-| macOS | Sequoia 15 | **Sonoma 14.7.x** (fleet: 14.7.5 / 23H527) | matches the fleet; `Mac14,3` / M2 mini |
+| macOS | Sequoia 15 | **Sonoma 14.6.1 (23G93)** — fleet is 14.7.5, unreachable | closest available to the fleet; `Mac14,3` / M2 mini |
 | SIP | disabled (phase 2) | **left enabled** | prod signers run SIP-on; the role converges under it there |
-| Phases | 4 | **3 + an OS-update step** | no SIP-disable phase; see "Getting to 14.7.x" |
+| Phases | 4 | **3 + Xcode** (the OS-update step can never work) | no SIP-disable phase; see "OS version is fixed at restore time" |
 | Hostname | MAC-derived, self-assigned | **host-allocated, fail-closed** | hostname is the flavor selector |
-| puppet branch | `master` | **`macos-signer-latest`** | what `puppet::periodic` pins for signers |
+| puppet branch | `master` | **`master` (temporarily)** | fleet tracks `macos-signer-latest`, which lacks the role — see the pin section |
 | `profiles::hardware` | not in role | **excluded from role** | `assert_firmware` fail()s on `VirtualMac2,1` |
 | `profiles::duo` | n/a | **excluded from role** | `pam_duo.so` in `/etc/pam.d/sshd` locks Packer out |
 | Dev ID CA | n/a | **baked into System keychain** | arrives by MDM profile on hardware; VMs aren't enrolled |
@@ -98,7 +98,7 @@ Iterating on the puppet phases against an already-built base:
 SKIP_BASE=1 SKIP_OS_UPDATE=1 ./builder.sh
 ```
 
-### Getting to 14.7.x
+### OS version is fixed at restore time
 
 **You cannot restore straight to the fleet's version.** The signers run macOS
 14.7.5 (23H527), but Apple never published a full restore IPSW for it. Sonoma
@@ -107,11 +107,24 @@ releases were security updates delivered through `softwareupdate`, not full
 restores. (Absent from both ipsw.me's `Mac14,3` index and Mr. Macintosh's IPSW
 database; Apple's own mesu catalog only carries the current release.)
 
-So the version story is two steps, and `update-os.pkr.hcl` is the second:
+`update-os.pkr.hcl` exists to close that gap by running `softwareupdate` after
+the restore — **and it cannot work.** A Virtualization.framework guest cannot
+personalize an OS update:
 
-1. **Phase 1** restores 14.6.1 from the IPSW.
-2. **Phase 1.5** runs `softwareupdate`, refusing anything that would leave
-   macOS 14, and asserts the result is still a 14.x.
+```
+Failed to download & prepare update: ... MobileSoftwareUpdateErrorDomain
+Code=1256 "Failed to find SFR recovery volume"
+```
+
+`softwareupdate` downloads to 100%, fails to personalize, and **exits zero** —
+so the phase originally reported success on an untouched guest. It now records
+the pre-update version and fails loudly if nothing moved.
+
+**Consequence: a VM's macOS version is permanently whatever IPSW it restored
+from.** No security updates, ever. `SKIP_OS_UPDATE=1` is set unconditionally in
+CI for this reason. (A diagnostic did report `No recovery partition was found`,
+so preserving the recovery partition might make this work — untested, and worth
+checking before treating the 14.6.1 pin as permanent.)
 
 **The fleet's exact version is not reachable, and the gap is wider than
 expected.** `softwareupdate` only offers the *current* security update for a
@@ -123,18 +136,14 @@ major. Measured on a fresh 14.6.1 guest, 2026-08-12:
 * Label: Safari26.6SonomaAuto-26.6
 ```
 
-So Sonoma did not stop at 14.7.x — there is a 14.8 line, and the newest is
-**14.8.9**. Phase 1.5 therefore lands the image **ahead of the fleet** (14.8.9
-vs 14.7.5), not level with it. 14.7.5 is not offered and cannot be reached this
-way.
+So Sonoma did not stop at 14.7.x — there is a 14.8 line, and the newest offered
+is **14.8.9**. None of it is installable in a guest (see above), so the image
+sits at **14.6.1**: one minor behind the fleet's 14.7.5, and unpatchable.
 
 Both are Darwin 23, so `mac_signing.pp`'s version case treats them identically
-and the puppet run does not care. Whether the divergence matters for
-codesign/notarytool reproducibility is a fleet-patching decision:
-
-- accept **14.8.9** in the image, and consider patching the fleet toward it;
-- `SKIP_OS_UPDATE=1` to stay on **14.6.1** — behind the fleet rather than ahead;
-- `TARGET_LABEL=...` if a specific build is ever offered again.
+and the puppet run does not care. Whether the gap matters for
+codesign/notarytool reproducibility is a fleet decision, not something this
+pipeline can fix.
 
 ### Phase 1 is the flaky one
 
@@ -348,23 +357,68 @@ template, not a deployable worker. Iteration 2 needs a `vault-inject`
 equivalent that runs puppet again *after* `set_hostname.sh` has applied the
 allocated identity.
 
-### ⚠️ The shipped image cannot currently run puppet on boot
+### 🧪 Exercising puppet on the image (opt-in dry run)
 
-Phase 2 pins the image's runtime `PUPPET_BRANCH` to **`macos-signer-latest`**,
-which is the branch the signer fleet tracks. As of 2026-08-12 that branch does
-**not** contain `roles_profiles::roles::mac_v4_signing_dep_vms` — the role
-merged to `master` (ronin_puppet#1325) and `macos-signer-latest` lags master by
-several commits.
+The image ships **without** `/var/root/vault.yaml`, and `run-puppet.sh` hard-fails
+without one (`[ -f '/var/root/vault.yaml' ] || fail "Secrets file not found"`), so
+puppet cannot simply be invoked. To see how far the catalog gets without real
+credentials:
 
-So a deployed VM that runs `run-puppet.sh` would fail to compile its catalog
-("could not find class") and then **retry forever**, because the bootstrap
-scripts never give up. This does not affect a smoke test — nothing re-runs
-puppet unless you ask it to — but it must be resolved before the image is
-deployed anywhere.
+```bash
+sudo /usr/local/bin/signer14-puppet-dryrun.sh
+```
 
-Fix is to advance `macos-signer-latest`. That is a fleet-affecting change (it
-is the branch every prod signer tracks), so it is deliberately **not** bundled
-with this image work.
+That stages the obviously-fake build vault from `/usr/local/share/signer14/`,
+runs puppet against `master`, and **removes the vault again on exit** (including
+on Ctrl-C). The image is credential-free at rest and only carries a vault for the
+duration of a deliberate run.
+
+Removing it afterwards is load-bearing, not tidiness: `com.mozilla.periodic.plist`
+runs puppet every **900 seconds**, so a vault left behind converts a one-shot dry
+run into an unattended puppet loop.
+
+Override the branch if needed:
+
+```bash
+sudo PUPPET_BRANCH=some-branch /usr/local/bin/signer14-puppet-dryrun.sh
+```
+
+Note the two `run-puppet.sh` copies behave differently, which is easy to trip on:
+
+| | branch source | no-vault behaviour |
+|---|---|---|
+| `/usr/local/bin/run-puppet.sh` (puppet-managed, templated) | `${PUPPET_BRANCH:-<baked>}` — **env wins** | `fail "Secrets file not found"` |
+| the S3 copy used during the build | `source`s `ronin_settings`, which **overwrites** env | `exit 0` "exiting gracefully" |
+
+The dry-run wrapper uses the templated one so `PUPPET_BRANCH` actually takes
+effect.
+
+Expect no firewall rules to appear: the image's FQDN is pinned to `.invalid`, so
+`fw::roles::mac_signing` skips — which is also what stops a puppet run severing
+your SSH session.
+
+### ⚠️ Puppet branch pin: temporarily `master`, not `macos-signer-latest`
+
+The signer fleet tracks **`macos-signer-latest`**, but that branch does **not**
+contain `roles_profiles::roles::mac_v4_signing_dep_vms` — the role merged to
+`master` (ronin_puppet#1325) and `macos-signer-latest` lags it.
+
+Pinning the image at `macos-signer-latest` therefore made puppet unable to
+compile its catalog at all ("could not find class"), which it would then retry
+**forever**, because the bootstrap scripts never give up. That left the image
+impossible to exercise beyond the build, so phase 2 now pins **`master`**
+instead.
+
+**This must revert to `macos-signer-latest`** once that branch carries the role,
+so the image tracks the puppet code the fleet actually runs. Building and running
+from `master` means the image can drift from the fleet; it is the lesser evil only
+while the pointer branch is behind.
+
+Advancing `macos-signer-latest` is the real fix. It moves the branch every prod
+signer tracks, so it is a fleet-affecting change and deliberately **not** bundled
+with this image work. (Of the commits between the two, only a `modules/sudo`
+change — adding `validate_cmd => visudo -c` to the `/etc/sudoers` concat — touches
+anything the signer role uses.)
 
 Note also that `packages_classes` is absent from the fake vault, so
 `packages_installed` is a no-op and nothing from `packages::` is installed. The
