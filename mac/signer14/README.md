@@ -252,6 +252,62 @@ identical wherever it runs, and phase 1 asserts both properties before puppet.
 signer VM needs the firewall reconsidered — either its real FQDN matching on the
 deployed network, or filtering at the tart host.
 
+### The vault binary has a revoked signing certificate
+
+Found on first GUI login of the published image, which greeted the user with:
+
+> **"vault will damage your computer."** … *Report malware to Apple to protect
+> other users* ☑
+
+Not a false positive on Apple's part, and nothing to do with quarantine — there
+is no `com.apple.quarantine` xattr on the file. Measured in the image:
+
+```
+$ spctl -a -vv /usr/local/bin/vault
+/usr/local/bin/vault: CSSMERR_TP_CERT_REVOKED
+$ file /usr/local/bin/vault
+/usr/local/bin/vault: Mach-O 64-bit executable x86_64
+-rwxr-xr-x  root wheel  201646752  Jun 15 2021  /usr/local/bin/vault
+```
+
+The **signing certificate has been revoked** on the vault 1.7.3 build in S3
+(`packages::vault::version: 1.7.3`), and it is an Intel-only binary from June
+2021. Consequences, all verified:
+
+- `launchctl list` shows **no** `vault-agent` — the daemon has never started.
+- `/var/log/vault-agent.log` does not exist.
+- `vault version` produces no output; the binary cannot execute.
+
+S3 holds only `vault-1.6.1.pkg` and `vault-1.7.3.pkg`, both of that vintage, so
+there is no newer artifact to pin to. Phase 2 therefore disables the daemon —
+this image has no approle credentials and could never have used it anyway —
+rather than confront every user with a malware alert.
+
+**This is very likely a production issue too, and it explains an earlier
+oddity.** On `fx-mac-v4-signing01`, `/etc/vault_approle_secret` is **zero bytes**
+and `/etc/vault_token` **does not exist** — exactly what you would see if
+vault-agent had never successfully run there either. Worth checking on a real
+signer:
+
+```bash
+spctl -a -vv /usr/local/bin/vault
+sudo launchctl list | grep -i vault
+file /usr/local/bin/vault
+```
+
+The real fix is a current, notarised, universal vault binary in S3 plus a
+`packages::vault::version` bump — fleet-wide, and deliberately out of scope for
+this image.
+
+### First-login polish
+
+`create-base` drives System Settings over VNC to enable Screen Sharing and
+Remote Login, and macOS records that in `admin`'s per-host relaunch list, so the
+first GUI login reopened System Settings on the Appearance pane.
+`macos_utils::clean_appstate` handles precisely this for the six scriptworker
+users but nothing covered `admin` — the account a human actually logs into.
+Phase 2 now clears it.
+
 ### A ronin_puppet bug this surfaced
 
 `vault_agent` declares the `vault` gem `ensure => present` with **no version
