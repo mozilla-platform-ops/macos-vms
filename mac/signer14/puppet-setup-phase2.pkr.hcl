@@ -171,35 +171,6 @@ build {
       "sudo -u admin defaults -currentHost read com.apple.loginwindow TALAppsToRelaunchAtLogin 2>&1 | head -3",
 
       # -----------------------------------------------------------------------
-      # Disable vault-agent — its binary cannot execute
-      # -----------------------------------------------------------------------
-      # On first GUI login macOS throws a full malware alert:
-      #   "vault will damage your computer. ... Report malware to Apple"
-      # because launchd tries to start io.vaultproject.vault-agent and Gatekeeper
-      # refuses the binary. Measured in the image:
-      #
-      #   $ spctl -a -vv /usr/local/bin/vault
-      #   /usr/local/bin/vault: CSSMERR_TP_CERT_REVOKED
-      #   $ file /usr/local/bin/vault
-      #   Mach-O 64-bit executable x86_64          # Intel-only, dated Jun 2021
-      #
-      # The signing certificate on the vault 1.7.3 build in S3 has been REVOKED,
-      # so the daemon has never run: `launchctl list` shows no vault-agent and
-      # /var/log/vault-agent.log does not exist. S3 holds only 1.6.1 and 1.7.3,
-      # both of that vintage, so there is no newer artifact to pin to.
-      #
-      # This image cannot use vault-agent regardless — it has no approle
-      # credentials — so disable the daemon rather than greet every user with a
-      # malware dialog for a tool that was never going to start. NOT a fix for
-      # the underlying problem: a current, notarised, universal vault binary
-      # needs uploading to S3 and packages::vault::version bumping, which is a
-      # fleet-wide change and deliberately out of scope here.
-      "echo 'Disabling vault-agent (binary has a revoked signing cert)...'",
-      "sudo launchctl disable system/vault-agent || echo 'WARN: could not disable vault-agent'",
-      "sudo launchctl bootout system/vault-agent 2>/dev/null || true",
-      "sudo launchctl print-disabled system 2>/dev/null | grep -i vault || echo '(vault-agent not listed as disabled)'",
-
-      # -----------------------------------------------------------------------
       # Drop build-only passwordless sudo
       # -----------------------------------------------------------------------
       # Phase 1 adds this so the provisioners can work; the bare-metal signers

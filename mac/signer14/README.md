@@ -269,7 +269,7 @@ Found on first GUI login of the published image, which greeted the user with:
 > other users* ☑
 
 Not a false positive on Apple's part, and nothing to do with quarantine — there
-is no `com.apple.quarantine` xattr on the file. Measured in the image:
+is no `com.apple.quarantine` xattr. Measured in the image:
 
 ```
 $ spctl -a -vv /usr/local/bin/vault
@@ -279,18 +279,28 @@ $ file /usr/local/bin/vault
 -rwxr-xr-x  root wheel  201646752  Jun 15 2021  /usr/local/bin/vault
 ```
 
-The **signing certificate has been revoked** on the vault 1.7.3 build in S3
-(`packages::vault::version: 1.7.3`), and it is an Intel-only binary from June
-2021. Consequences, all verified:
+The **signing certificate has been revoked** on the vault build in S3, and it is
+an Intel-only binary from June 2021. Consequences, all verified:
 
 - `launchctl list` shows **no** `vault-agent` — the daemon has never started.
 - `/var/log/vault-agent.log` does not exist.
 - `vault version` produces no output; the binary cannot execute.
 
-S3 holds only `vault-1.6.1.pkg` and `vault-1.7.3.pkg`, both of that vintage, so
-there is no newer artifact to pin to. Phase 2 therefore disables the daemon —
-this image has no approle credentials and could never have used it anyway —
-rather than confront every user with a malware alert.
+**Disabling the LaunchDaemon does not silence the alert.** That was tried first:
+the daemon was verifiably disabled (`"vault-agent" => disabled` on the built
+image) and the alert still fired on login. It comes from **XProtect scanning the
+file**, not from an execution attempt — so the only fix is for the file not to
+be there.
+
+`roles_profiles::roles::mac_v4_signing_dep_vms` therefore **excludes
+`profiles::vault_agent`** (ronin_puppet#1332), which is what pulls in
+`packages::vault`. Note that any puppet run reinstalls it if the profile is in
+the catalog, so deleting the file post-build would not have held — the dry-run
+alone was observed reinstalling `vault-1.6.1.pkg`.
+
+Re-add the profile once a current, notarised, universal vault binary is in S3 and
+`packages::vault::version` is bumped. S3 holds only `vault-1.6.1.pkg` and
+`vault-1.7.3.pkg`, both of that vintage.
 
 **This is very likely a production issue too, and it explains an earlier
 oddity.** On `fx-mac-v4-signing01`, `/etc/vault_approle_secret` is **zero bytes**
