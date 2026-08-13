@@ -14,10 +14,19 @@ on:
       puppet_branch:
         description: >-
           ronin_puppet branch to build against. Must contain
-          roles_profiles::roles::mac_v4_signing_dep_vms. Use the feature branch
-          until that role lands on macos-signer-latest.
+          roles_profiles::roles::mac_v4_signing_dep_vms.
+
+          TEMPORARY DEFAULT: `master`. The role merged to master
+          (ronin_puppet#1325) but macos-signer-latest — the branch the signer
+          fleet tracks — lags master and does NOT carry it yet. Defaulting to
+          macos-signer-latest made every push-triggered build fail to compile its
+          catalog and then spin in run-puppet.sh's forever-retry until the 45m
+          timeout; three such runs had to be cancelled by hand.
+
+          REVERT THIS TO 'macos-signer-latest' once that branch carries the role,
+          so the image is built from what the fleet actually runs.
         required: false
-        default: 'macos-signer-latest'
+        default: 'master'
       skip_base:
         description: 'Skip phase 1 (reuse an existing base VM on the runner)'
         required: false
@@ -114,7 +123,7 @@ jobs:
         working-directory: mac/signer14
         env:
           IPSW_URL: ${{ inputs.ipsw_url || 'https://updates.cdn-apple.com/2024SummerFCS/fullrestores/062-52859/932E0A8F-6644-4759-82DA-F8FA8DEA806A/UniversalMac_14.6.1_23G93_Restore.ipsw' }}
-          PUPPET_BRANCH: ${{ inputs.puppet_branch || 'macos-signer-latest' }}
+          PUPPET_BRANCH: ${{ inputs.puppet_branch || 'master' }}   # see the input's TEMPORARY DEFAULT note
           SKIP_BASE: ${{ inputs.skip_base == 'true' && '1' || '0' }}
           SKIP_XCODE: ${{ inputs.skip_xcode == 'true' && '1' || '0' }}
           # Always. In-place macOS updates fail inside a VZ guest with
@@ -199,7 +208,7 @@ jobs:
           | Image | \`${REGISTRY_IMAGE}\` |
           | Tag | \`${BUILD_TAG}\` |
           | Alias | \`${ALIAS_TAG}\` |
-          | Puppet branch | \`${{ inputs.puppet_branch || 'macos-signer-latest' }}\` |
+          | Puppet branch | \`${{ inputs.puppet_branch || 'master' }}\` |
 
           \`\`\`bash
           tart pull --insecure ${REGISTRY_HOST}:${REGISTRY_PORT}/${REGISTRY_IMAGE}:${ALIAS_TAG}
