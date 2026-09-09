@@ -97,6 +97,61 @@ build {
       "sudo mkdir -p /var/tmp/semaphore",
       "sudo touch /var/tmp/semaphore/run-buildbot",
 
+      # -----------------------------------------------------------------------
+      # -----------------------------------------------------------------------
+      # bug 2069268 -- hand the build account over to puppet, and fix ownership.
+      #
+      # This does NOT neutralise the account. It cannot: the tart packer plugin
+      # shuts the VM down with a command baked into its binary,
+      #
+      #     echo %s | sudo -S -p '' shutdown -h now
+      #
+      # which sudos as this very account AFTER every provisioner has run. Two
+      # earlier revisions tried to neutralise it here and both hung the build at
+      # "Waiting for the tart process to exit..." -- once from phase 1, once as
+      # the last act of phase 2. There is no point inside a packer build at which
+      # this account can be disabled.
+      #
+      # So the image ships with it intact and the guest role does the work on the
+      # first real boot instead (roles_profiles::profiles::disable_image_build_admin,
+      # which is what converged the running fleet). Clearing the marker below is
+      # what re-arms that.
+      #
+      # Residual: a freshly cloned guest carries the account live from boot until
+      # that first puppet run completes -- order minutes. Tracked in the bug. A
+      # first-boot LaunchDaemon would narrow it further if that is ever judged
+      # worth the extra machinery.
+      #
+      # The ownership fix DOES belong here: /usr/local/bin/set_hostname.sh and
+      # vault-inject.sh are executed by root LaunchDaemons at boot and ship owned
+      # by this account, because the file provisioner uploads as it and sudo mv
+      # preserves ownership. Root-executed scripts should be root-owned whatever
+      # else is true of the account.
+      "echo 'Reassigning build-account ownership and re-arming puppet (bug 2069268)...'",
+      <<-EOT
+        echo admin | sudo -S sh -c '
+          set -u
+
+          find /usr/local /opt /Library /etc -xdev -user admin -exec chown root:wheel {} + 2>/dev/null || true
+
+          # Provisioning is done -- let the guest role manage this account again
+          # on the next (runtime) puppet run. Cleared last so nothing above it can
+          # trip the role mid-build, and so the marker never ships in the image.
+          rm -f /var/root/.image-build-in-progress
+
+          # Verify in this same root shell: a non-zero exit fails the build.
+          leftover=$(find /usr/local /opt /Library /etc -xdev -user admin 2>/dev/null | head -5)
+          if [ -n "$leftover" ]; then
+            echo "FAIL: files still owned by the build account:"; echo "$leftover"; exit 1
+          fi
+          if [ -f /var/root/.image-build-in-progress ]; then
+            echo "FAIL: build marker still present; the guest role would stay disarmed"; exit 1
+          fi
+          echo "OK: ownership reassigned, build marker cleared"
+        '
+      EOT
+      ,
+
       "echo 'Finalizing setup. Ensuring clean exit...'",
       "exit 0"
     ]
