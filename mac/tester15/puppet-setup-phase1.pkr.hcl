@@ -89,6 +89,14 @@ build {
       "sudo sed -i '.bak' '/safaridriver/s/^/#/' /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/roles_profiles/manifests/roles/gecko_t_osx_1500_m_vms.pp",
       "sudo sed -i '.bak' '/pipconf/s/^/#/' /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/roles_profiles/manifests/roles/gecko_t_osx_1500_m_vms.pp",
 
+      # Tell the guest role not to neutralise the build account while we are
+      # still provisioning through it. run-puppet.sh applies the whole role, and
+      # the role now includes disable_image_build_admin -- without this marker it
+      # fires here in phase 1, and the build then wedges at "Gracefully shutting
+      # down the VM" because packer sudos as the account it just disabled.
+      # Removed at the end of phase 2, which does the neutralisation itself.
+      "echo admin | sudo -S touch /var/root/.image-build-in-progress",
+
       "echo 'Running run-puppet.sh...'",
       "echo admin | sudo -S /tmp/run-puppet.sh",
     ]

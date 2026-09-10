@@ -76,9 +76,16 @@ jobs:
             echo "ALIAS_TAG=prod-latest" >> $GITHUB_ENV
             echo "BUILD_TAG=prod-${GITHUB_SHA}" >> $GITHUB_ENV
           else
-            echo "non-main build -> pr tags (credential-free)"
-            echo "ALIAS_TAG=pr-${{ github.event.pull_request.number }}-latest" >> $GITHUB_ENV
-            echo "BUILD_TAG=pr-${{ github.event.pull_request.number }}-${GITHUB_SHA}" >> $GITHUB_ENV
+            # pull_request.number is empty on a workflow_dispatch, which used to
+            # yield "pr--<sha>". OCI rejects the doubled hyphen and the push fails
+            # AFTER a full 20-minute build -- so fall back to a sanitised ref name.
+            SLUG="${{ github.event.pull_request.number }}"
+            if [ -z "$SLUG" ]; then
+              SLUG=$(printf '%s' "${GITHUB_REF_NAME}" | tr -c 'a-zA-Z0-9' '-' | sed 's/--*/-/g; s/^-//; s/-$//')
+            fi
+            echo "non-main build -> pr tags (credential-free), slug=${SLUG}"
+            echo "ALIAS_TAG=pr-${SLUG}-latest" >> $GITHUB_ENV
+            echo "BUILD_TAG=pr-${SLUG}-${GITHUB_SHA}" >> $GITHUB_ENV
           fi
 
           echo ""
