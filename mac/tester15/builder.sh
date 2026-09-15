@@ -8,6 +8,10 @@ DEFAULT_VAULT_FILE="vault-fake.yaml"  # local/dev default
 # Allow overrides
 VM_NAME="${VM_NAME:-$DEFAULT_VM_NAME}"
 VAULT_FILE="${VAULT_FILE:-$DEFAULT_VAULT_FILE}"
+# Build-time-only ronin_puppet branch to apply (default master). When set to a
+# non-master branch, phase 2 bakes its engine and then removes the pin so the
+# runtime guest still tracks master. See bug 2071007.
+PUPPET_BRANCH="${PUPPET_BRANCH:-master}"
 
 # Ensure the vault exists (CI is non-interactive)
 if [[ ! -f "$VAULT_FILE" ]]; then
@@ -45,6 +49,7 @@ packer build -force \
 # Phase 4: Puppet setup phase 2
 packer build -force \
   -var="vm_name=$VM_NAME" \
+  -var="puppet_branch=$PUPPET_BRANCH" \
   puppet-setup-phase2.pkr.hcl
 
 echo "✅ Build process completed successfully!"

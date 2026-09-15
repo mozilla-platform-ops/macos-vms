@@ -2,6 +2,11 @@ name: Build macOS VM (PR and Main)
 
 on:
   workflow_dispatch:
+    inputs:
+      puppet_branch:
+        description: "ronin_puppet branch to apply at BUILD time only (bakes its engine, e.g. multiuser-static for bug 2071007). The pin is removed after the build so the runtime guest tracks master. Default master = a normal prod build."
+        required: false
+        default: "master"
   # SECURITY (Bug 2049579): do NOT trigger on pull_request. This job runs on a
   # non-ephemeral self-hosted runner; a fork PR would execute attacker-controlled
   # code there. Build only from trusted base-repo refs (push to main / dispatch).
@@ -112,6 +117,8 @@ jobs:
         env:
           VM_NAME: sequoia-tester
           VAULT_FILE: ${{ env.VAULT_FILE }}
+          # Build-time-only puppet branch (default master). See workflow_dispatch input.
+          PUPPET_BRANCH: ${{ github.event.inputs.puppet_branch || 'master' }}
         run: |
           set -euo pipefail
           echo "🏗️ Using VAULT_FILE=$VAULT_FILE"
