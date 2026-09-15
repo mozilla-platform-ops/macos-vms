@@ -94,6 +94,20 @@ build {
 
       "sudo rm /var/root/vault.yaml",
 
+      # CANARY (bug 2071007): pin the RUNTIME puppet branch so this image's guests
+      # apply the canary ronin branch (multiuser-static engine + post_task_action:
+      # halt) instead of master. Written AFTER the build-time run-puppet above, so
+      # the build itself stays on master (simple, the known-good build path) and
+      # only the first real boot reconfigures simple -> multiuser-static -- exactly
+      # the live path existing prod guests take when the role-data flip merges.
+      # run-puppet.sh reads PUPPET_BRANCH from this file every boot. Root-owned so
+      # it survives the ownership sweep below. DELETE this step before a prod image.
+      "echo 'CANARY: pinning runtime PUPPET_BRANCH to canary-2071007-multiuser-static...'",
+      "echo admin | sudo -S mkdir -p /opt/puppet_environments",
+      "echo admin | sudo -S sh -c 'printf \"PUPPET_BRANCH=canary-2071007-multiuser-static\\n\" > /opt/puppet_environments/ronin_settings'",
+      "echo admin | sudo -S chown root:wheel /opt/puppet_environments/ronin_settings",
+      "echo admin | sudo -S chmod 644 /opt/puppet_environments/ronin_settings",
+
       "sudo mkdir -p /var/tmp/semaphore",
       "sudo touch /var/tmp/semaphore/run-buildbot",
 
