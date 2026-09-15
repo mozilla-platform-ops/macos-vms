@@ -4,6 +4,10 @@ cltbld_user:
     kcpassword: "gQuCSFO0nwdlrwbRdyZwig"
     password: "lskfdjflksdjfkl2938409238490238042sdklfjklsdjfklsdjfkljskl"
     salt: "490238490238ijfklsdjfkljsdkljf9238490324809238490324023840923849823084092384920klsjdflkdsjfkl"
+    # multiuser-static resolves task_user_password from cltbld_user.unhashedpassword,
+    # so a build-time multiuser-static apply needs it present. Fake/build-only; the
+    # real value comes from the broker vault at runtime.
+    unhashedpassword: "build-only-placeholder"
 
 generic_worker:
     gecko-t-osx-1500-m-vms:
