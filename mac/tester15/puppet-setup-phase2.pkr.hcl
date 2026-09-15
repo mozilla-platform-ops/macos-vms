@@ -87,26 +87,27 @@ build {
       "sudo sed -i '.bak' '/#.*safaridriver/s/^#//' /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/roles_profiles/manifests/roles/gecko_t_osx_1500_m_vms.pp",
       "sudo sed -i '.bak' '/#.*pipconf/s/^#//' /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/roles_profiles/manifests/roles/gecko_t_osx_1500_m_vms.pp",
 
+      # CANARY (bug 2071007): pin the puppet branch to the canary ronin branch
+      # BEFORE the build-time run-puppet below, so the IMAGE is baked
+      # multiuser-static (engine + post_task_action: halt) rather than simple.
+      # This is the fix for the per-task-reversion churn: a simple-baked image
+      # had to re-converge simple -> multiuser-static on every reclone, and the
+      # halt fired mid-convergence and looped. Baking the engine means each
+      # reclone yields a ready multiuser-static guest with no convergence phase.
+      # run-puppet.sh also reads this at runtime (persists in the image), so the
+      # guest keeps applying the canary branch. DELETE before a prod image.
+      "echo 'CANARY: pinning PUPPET_BRANCH to canary-2071007-multiuser-static (build + runtime)...'",
+      "echo admin | sudo -S mkdir -p /opt/puppet_environments",
+      "echo admin | sudo -S sh -c 'printf \"PUPPET_BRANCH=canary-2071007-multiuser-static\\n\" > /opt/puppet_environments/ronin_settings'",
+      "echo admin | sudo -S chown root:wheel /opt/puppet_environments/ronin_settings",
+      "echo admin | sudo -S chmod 644 /opt/puppet_environments/ronin_settings",
+
       "echo 'Running run-puppet.sh...'",
       "curl -o /tmp/run-puppet.sh https://ronin-puppet-package-repo.s3.us-west-2.amazonaws.com/macos/public/common/run-puppet.sh",
       "echo admin | sudo chmod +x /tmp/run-puppet.sh",
       "echo admin | sudo -S /tmp/run-puppet.sh || echo 'Puppet run completed with errors, but continuing...'",
 
       "sudo rm /var/root/vault.yaml",
-
-      # CANARY (bug 2071007): pin the RUNTIME puppet branch so this image's guests
-      # apply the canary ronin branch (multiuser-static engine + post_task_action:
-      # halt) instead of master. Written AFTER the build-time run-puppet above, so
-      # the build itself stays on master (simple, the known-good build path) and
-      # only the first real boot reconfigures simple -> multiuser-static -- exactly
-      # the live path existing prod guests take when the role-data flip merges.
-      # run-puppet.sh reads PUPPET_BRANCH from this file every boot. Root-owned so
-      # it survives the ownership sweep below. DELETE this step before a prod image.
-      "echo 'CANARY: pinning runtime PUPPET_BRANCH to canary-2071007-multiuser-static...'",
-      "echo admin | sudo -S mkdir -p /opt/puppet_environments",
-      "echo admin | sudo -S sh -c 'printf \"PUPPET_BRANCH=canary-2071007-multiuser-static\\n\" > /opt/puppet_environments/ronin_settings'",
-      "echo admin | sudo -S chown root:wheel /opt/puppet_environments/ronin_settings",
-      "echo admin | sudo -S chmod 644 /opt/puppet_environments/ronin_settings",
 
       "sudo mkdir -p /var/tmp/semaphore",
       "sudo touch /var/tmp/semaphore/run-buildbot",

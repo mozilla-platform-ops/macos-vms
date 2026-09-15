@@ -4,6 +4,11 @@ cltbld_user:
     kcpassword: "gQuCSFO0nwdlrwbRdyZwig"
     password: "lskfdjflksdjfkl2938409238490238042sdklfjklsdjfklsdjfkljskl"
     salt: "490238490238ijfklsdjfkljsdkljf9238490324809238490324023840923849823084092384920klsjdflkdsjfkl"
+    # CANARY (bug 2071007): multiuser-static resolves task_user_password from
+    # cltbld_user.unhashedpassword, so the build-time apply needs it present.
+    # Fake, build-only placeholder -- the real value is injected from the broker
+    # vault at runtime and overwrites the worker config on first boot.
+    unhashedpassword: "canary-build-placeholder"
 
 generic_worker:
     gecko-t-osx-1500-m-vms:
