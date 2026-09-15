@@ -12,6 +12,15 @@ variable "vm_name" {
   default = "seqoia-tester"
 }
 
+# Build-time-only ronin_puppet branch (bug 2071007). Default "master" = normal
+# build. When set to a branch, phase 2 pins run-puppet to it (bakes that branch's
+# engine, e.g. multiuser-static + gw 91.0.2) and then REMOVES the pin, so the
+# shipped image's runtime guest still tracks master.
+variable "puppet_branch" {
+  type    = string
+  default = "master"
+}
+
 source "tart-cli" "puppet-setup-phase2" {
   vm_name      = "${var.vm_name}"
   cpu_count    = 4
@@ -87,10 +96,18 @@ build {
       "sudo sed -i '.bak' '/#.*safaridriver/s/^#//' /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/roles_profiles/manifests/roles/gecko_t_osx_1500_m_vms.pp",
       "sudo sed -i '.bak' '/#.*pipconf/s/^#//' /opt/puppet_environments/mozilla-platform-ops/ronin_puppet/modules/roles_profiles/manifests/roles/gecko_t_osx_1500_m_vms.pp",
 
+      # bug 2071007: apply a specific ronin branch at BUILD time to bake its engine
+      # (e.g. multiuser-static + gw 91.0.2). run-puppet.sh reads PUPPET_BRANCH from
+      # this file. Default puppet_branch=master writes nothing (normal build).
+      "if [ \"${var.puppet_branch}\" != \"master\" ]; then echo \"BUILD-TIME puppet branch override: ${var.puppet_branch} (pin removed after the apply)\"; echo admin | sudo -S mkdir -p /opt/puppet_environments; echo admin | sudo -S sh -c \"printf 'PUPPET_BRANCH=${var.puppet_branch}\\n' > /opt/puppet_environments/ronin_settings\"; echo admin | sudo -S chown root:wheel /opt/puppet_environments/ronin_settings; fi",
+
       "echo 'Running run-puppet.sh...'",
       "curl -o /tmp/run-puppet.sh https://ronin-puppet-package-repo.s3.us-west-2.amazonaws.com/macos/public/common/run-puppet.sh",
       "echo admin | sudo chmod +x /tmp/run-puppet.sh",
       "echo admin | sudo -S /tmp/run-puppet.sh || echo 'Puppet run completed with errors, but continuing...'",
+
+      # Remove the build-time pin so the shipped image's runtime guest tracks master.
+      "if [ \"${var.puppet_branch}\" != \"master\" ]; then echo admin | sudo -S rm -f /opt/puppet_environments/ronin_settings; echo 'Removed build-time puppet-branch pin; runtime tracks master'; fi",
 
       "sudo rm /var/root/vault.yaml",
 
