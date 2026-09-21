@@ -74,6 +74,12 @@ build {
     inline = [
 
       # Keep the VM awake and out of the screensaver, same as the tester image.
+      # NOTE (bug 2073762): the second line covers the BUILD ADMIN only --
+      # `-currentHost` writes to the invoking user's ByHost domain, keyed to the
+      # hardware UUID, so it does not reach the task user on a cloned guest. See
+      # the longer note in mac/tester15/puppet-setup-phase2.pkr.hcl. The signer
+      # image has not been observed hanging on this, but it inherits the same
+      # gap if anything on it ever waits on window focus.
       "sudo defaults write /Library/Preferences/com.apple.screensaver loginWindowIdleTime 0",
       "defaults -currentHost write com.apple.screensaver idleTime 0",
       "sudo systemsetup -setsleep Off 2>/dev/null || true",
