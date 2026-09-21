@@ -58,9 +58,25 @@ build {
   provisioner "shell" {
     inline = [
 
-      // Disable screensaver at login screen
+      // Disable the screen saver at the login window. This one is system-wide
+      // and does what it says.
       "sudo defaults write /Library/Preferences/com.apple.screensaver loginWindowIdleTime 0",
-      // Disable screensaver for admin user
+      // Disable the screen saver for the BUILD ADMIN only.
+      //
+      // bug 2073762: this line reads like it covers the whole image, and it does
+      // not. `defaults -currentHost` writes to the *invoking* user's ByHost
+      // domain -- here that is the packer build account, not cltbld -- and the
+      // domain is keyed to the hardware UUID, which a cloned guest does not
+      // share with the builder. So cltbld kept com.apple.screensaver's default
+      // idleTime of 1200s, its console session locked 20 minutes after login,
+      // and every reftest that then waited on a focus event hung until its
+      // 370s no-output timeout.
+      //
+      // Do NOT try to fix that by adding another `-currentHost` write here: the
+      // hardware-UUID keying makes it miss again. The task user's screen saver
+      // is handled at runtime by macos_utils::prevent_idle_lock in ronin_puppet
+      // (a caffeinate LaunchAgent plus an in-session idleTime write), which
+      // re-applies on every guest boot via vault-inject.sh.
       "defaults -currentHost write com.apple.screensaver idleTime 0",
       // Prevent the VM from sleeping
       "sudo systemsetup -setsleep Off 2>/dev/null",
